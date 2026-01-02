@@ -1,0 +1,31 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Users collection - users can read and write their own document
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Agents subcollection - users can read and write their own agents
+      match /agents/{agentId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+        
+        // Sources subcollection - users can read and write their own sources
+        match /sources/{sourceId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+      }
+      
+      // Sources subcollection under user - users can read and write their own sources
+      match /sources/{sourceId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+    
+    // Default: deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

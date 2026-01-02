@@ -1,65 +1,288 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { Clock, Plus } from "lucide-react";
+import Link from "next/link";
+import { GoWorkflow } from "react-icons/go";
+import { MdChatBubble } from "react-icons/md";
+import { FaHandsHelping } from "react-icons/fa";
+import { VscSettings, VscInfo } from "react-icons/vsc";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { getUserAgents, Agent } from "@/tools/agent_tools";
+
+// Dummy data - will be replaced with Firebase data
+const dummyTasks = {
+  hasPendingTasks: false,
+};
+
+const dummyAgentRuns = [
+  {
+    id: "1",
+    agentName: "HR copilot",
+    nextRun: "Tomorrow @ 9am",
+  },
+];
+
+// Helper function to get icon component based on agent type
+function getAgentTypeIcon(type: string) {
+  switch (type.toLowerCase()) {
+    case "workflow":
+      return <GoWorkflow className="h-5 w-5" />;
+    case "source chat":
+      return <MdChatBubble className="h-5 w-5" />;
+    case "copilot":
+      return <FaHandsHelping className="h-5 w-5" />;
+    default:
+      return null;
+  }
+}
+
+export default function DashboardPage() {
+  const router = useRouter();
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [isLoadingAgents, setIsLoadingAgents] = useState(true);
+
+  useEffect(() => {
+    const fetchAgents = async () => {
+      try {
+        setIsLoadingAgents(true);
+        const userAgents = await getUserAgents();
+        setAgents(userAgents);
+      } catch (error) {
+        console.error("Failed to fetch agents:", error);
+      } finally {
+        setIsLoadingAgents(false);
+      }
+    };
+
+    fetchAgents();
+  }, []);
+
+  const handleAgentTypeSelect = (type: string) => {
+    setIsMenuOpen(false);
+
+    // Navigate to the corresponding agent creation page with ?new=true query param
+    switch (type.toLowerCase()) {
+      case "workflow":
+        router.push("/workflowAgent?new=true");
+        break;
+      case "source chat":
+        router.push("/chatAgent?new=true");
+        break;
+      case "copilot":
+        router.push("/copilotAgent?new=true");
+        break;
+      default:
+        break;
+    }
+  };
+
+  const handleAgentRowClick = (agent: Agent) => {
+    const basePath =
+      agent.type === "workflow"
+        ? "/workflowAgent"
+        : agent.type === "source chat"
+          ? "/chatAgent"
+          : "/copilotAgent";
+
+    const params = new URLSearchParams({ id: agent.id });
+    if (agent.name) {
+      params.set("name", agent.name);
+    }
+
+    router.push(`${basePath}?${params.toString()}`);
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="space-y-4 relative pb-20">
+      {/* Top two boxes */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {/* Your Tasks Section */}
+        <div className="space-y-4">
+          <h2 className="text-lg font-semibold">Your Tasks</h2>
+          <div className="rounded-lg border bg-card p-6">
+            {dummyTasks.hasPendingTasks ? (
+              <p className="text-sm text-muted-foreground">
+                You have pending tasks
+              </p>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground mb-4">
+                  No pending tasks
+                </p>
+                <Link
+                  href="#"
+                  className="text-sm text-primary underline-offset-4 hover:underline inline-flex items-center gap-1"
+                >
+                  What are agent tasks? →
+                </Link>
+              </>
+            )}
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        {/* Upcoming agent runs Section */}
+        <div className="space-y-4">
+          <h2 className="text-lg font-semibold">Upcoming agent runs</h2>
+          <div className="rounded-lg border bg-card p-6">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-2 px-4 text-sm font-medium text-muted-foreground">
+                      Agent name
+                    </th>
+                    <th className="text-left py-2 px-4 text-sm font-medium text-muted-foreground">
+                      Next run
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dummyAgentRuns.length > 0 ? (
+                    dummyAgentRuns.map((run) => (
+                      <tr key={run.id} className="border-b last:border-b-0">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm">{run.agentName}</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-sm">{run.nextRun}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td
+                        colSpan={2}
+                        className="py-4 px-4 text-center text-sm text-muted-foreground"
+                      >
+                        No upcoming runs
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-      </main>
+      </div>
+
+      {/* Agents table section - full width */}
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold">Agents</h2>
+        <div className="rounded-lg border bg-card p-6">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-2 px-4 text-sm font-medium text-muted-foreground">
+                    Type
+                  </th>
+                  <th className="text-left py-2 px-4 text-sm font-medium text-muted-foreground">
+                    Name
+                  </th>
+                  <th className="text-left py-2 px-4 text-sm font-medium text-muted-foreground">
+                    Info
+                  </th>
+                  <th className="text-left py-2 px-4 text-sm font-medium text-muted-foreground">
+                    Settings
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {isLoadingAgents ? (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="py-4 px-4 text-center text-sm text-muted-foreground"
+                    >
+                      Loading agents...
+                    </td>
+                  </tr>
+                ) : agents.length > 0 ? (
+                  agents.map((agent) => (
+                    <tr
+                      key={agent.id}
+                      onClick={() => handleAgentRowClick(agent)}
+                      className="border-b last:border-b-0 cursor-pointer hover:bg-muted/50"
+                    >
+                      <td className="py-3 px-4">
+                        <div className="flex items-center">
+                          {getAgentTypeIcon(agent.type)}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-sm">
+                        {agent.name || `${agent.type} agent`}
+                      </td>
+                      <td className="py-3 px-4">
+                        <VscInfo className="h-5 w-5" />
+                      </td>
+                      <td className="py-3 px-4">
+                        <VscSettings className="h-5 w-5" />
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="py-4 px-4 text-center text-sm text-muted-foreground"
+                    >
+                      No agents found
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* Floating Action Button */}
+      <div className="fixed bottom-6 right-6 z-50">
+        <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="lg"
+              className="rounded-lg px-6 h-14 shadow-lg hover:shadow-xl transition-shadow gap-2 bg-card text-card-foreground border border-border hover:bg-accent hover:text-accent-foreground"
+            >
+              <Plus className="h-5 w-5" />
+              <span>Add new agent</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem
+              onClick={() => handleAgentTypeSelect("workflow")}
+              className="flex items-center gap-2 cursor-pointer"
+            >
+              <GoWorkflow className="h-4 w-4" />
+              <span>Workflow</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => handleAgentTypeSelect("source chat")}
+              className="flex items-center gap-2 cursor-pointer"
+            >
+              <MdChatBubble className="h-4 w-4" />
+              <span>Source Chat</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => handleAgentTypeSelect("copilot")}
+              className="flex items-center gap-2 cursor-pointer"
+            >
+              <FaHandsHelping className="h-4 w-4" />
+              <span>Copilot</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </div>
   );
 }
