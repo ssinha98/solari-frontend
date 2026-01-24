@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { doc, getDoc } from "firebase/firestore";
 import { createAgent, updateAgentName } from "@/tools/agent_tools";
+import { auth, db } from "@/tools/firebase";
 import {
   Dialog,
   DialogContent,
@@ -41,7 +43,18 @@ function CopilotAgentContent() {
 
       const initializeAgent = async () => {
         try {
-          const id = await createAgent("copilot");
+          const user = auth.currentUser;
+          if (!user) {
+            throw new Error("User must be authenticated to create an agent");
+          }
+          const userSnap = await getDoc(doc(db, "users", user.uid));
+          const teamId = userSnap.exists()
+            ? (userSnap.data().teamId as string | undefined)
+            : undefined;
+          if (!teamId) {
+            throw new Error("Team ID not found");
+          }
+          const id = await createAgent("copilot", teamId, user.uid);
           setAgentId(id);
           setShowNameDialog(true);
         } catch (error) {

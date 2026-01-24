@@ -1,12 +1,15 @@
 "use client";
 
 import { useState, useEffect, useRef, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ConfigureChat } from "@/components/configure-chat";
 import { RunChat } from "@/components/run-chat";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { createAgent, updateAgentName } from "@/tools/agent_tools";
+import { auth, db } from "@/tools/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -19,12 +22,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 function ChatAgentContent() {
+  const router = useRouter();
   const [editMode, setEditMode] = useState(false);
   const [agentId, setAgentId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [showNameDialog, setShowNameDialog] = useState(false);
   const [agentName, setAgentName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [canEditAgent, setCanEditAgent] = useState<boolean | null>(null);
   const searchParams = useSearchParams();
   const hasCreatedRef = useRef(false);
 
@@ -33,6 +38,9 @@ function ChatAgentContent() {
   useEffect(() => {
     const idFromParams = searchParams.get("id");
     const shouldCreateNew = searchParams.get("new") === "true";
+    const shouldEdit = searchParams.get("edit") === "true";
+
+    setEditMode(shouldEdit);
 
     if (idFromParams) {
       setAgentId(idFromParams);
@@ -45,7 +53,18 @@ function ChatAgentContent() {
 
       const initializeAgent = async () => {
         try {
-          const id = await createAgent("source chat");
+          const user = auth.currentUser;
+          if (!user) {
+            throw new Error("User must be authenticated to create an agent");
+          }
+          const userSnap = await getDoc(doc(db, "users", user.uid));
+          const teamId = userSnap.exists()
+            ? (userSnap.data().teamId as string | undefined)
+            : undefined;
+          if (!teamId) {
+            throw new Error("Team ID not found");
+          }
+          const id = await createAgent("source chat", teamId, user.uid);
           setAgentId(id);
           setShowNameDialog(true);
         } catch (error) {
@@ -59,13 +78,76 @@ function ChatAgentContent() {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    const checkAgentPermission = async () => {
+      const user = auth.currentUser;
+      if (!user || !agentId) {
+        setCanEditAgent(null);
+        return;
+      }
+
+      try {
+        const userSnap = await getDoc(doc(db, "users", user.uid));
+        if (!userSnap.exists()) {
+          setCanEditAgent(false);
+          return;
+        }
+
+        const teamId = userSnap.data().teamId as string | undefined;
+        if (!teamId) {
+          setCanEditAgent(false);
+          return;
+        }
+
+        const teamUserSnap = await getDoc(
+          doc(db, "teams", teamId, "users", user.uid)
+        );
+        if (!teamUserSnap.exists()) {
+          setCanEditAgent(false);
+          return;
+        }
+
+        const data = teamUserSnap.data();
+        const agents = Array.isArray(data.agents) ? data.agents : [];
+        const agentPermission = agents.find(
+          (agent: { agent_id?: string; role?: string }) =>
+            agent.agent_id === agentId
+        )?.role;
+
+        setCanEditAgent(
+          agentPermission === "edit" || agentPermission === "admin"
+        );
+      } catch (error) {
+        console.error("Failed to check agent permissions:", error);
+        setCanEditAgent(false);
+      }
+    };
+
+    checkAgentPermission();
+  }, [agentId]);
+
+  useEffect(() => {
+    if (canEditAgent === false && editMode) {
+      setEditMode(false);
+      toast.error(
+        "You don't have permission to edit this agent. Contact your team admin or the owner of this agent if you thikn this is wrong"
+      );
+    }
+  }, [canEditAgent, editMode]);
+
   const handleSaveName = async () => {
     if (!agentId || !agentName.trim()) return;
 
     try {
       setIsSaving(true);
-      await updateAgentName(agentId, agentName.trim());
+      const trimmedName = agentName.trim();
+      await updateAgentName(agentId, trimmedName);
       setShowNameDialog(false);
+      router.replace(
+        `/chatAgent?id=${agentId}&edit=false&name=${encodeURIComponent(
+          trimmedName
+        )}`
+      );
     } catch (error) {
       console.error("Failed to save agent name:", error);
     } finally {
@@ -89,7 +171,15 @@ function ChatAgentContent() {
             <Switch
               id="edit-mode"
               checked={editMode}
-              onCheckedChange={setEditMode}
+              onCheckedChange={(next) => {
+                if (next && canEditAgent === false) {
+                  toast.error(
+                    "You don't have permission to edit this agent. Contact your team admin or the owner of this agent if you thikn this is wrong"
+                  );
+                  return;
+                }
+                setEditMode(next);
+              }}
             />
             <Label htmlFor="edit-mode">Edit mode</Label>
           </div>

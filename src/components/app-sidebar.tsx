@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, FolderKanban, Settings } from "lucide-react";
+import { LayoutDashboard, FolderKanban, Settings, Users } from "lucide-react";
 
 import {
   Sidebar,
@@ -22,9 +22,9 @@ const items = [
     icon: LayoutDashboard,
   },
   {
-    title: "Projects",
-    url: "/projects",
-    icon: FolderKanban,
+    title: "Members & Permissions",
+    url: "/members",
+    icon: Users,
   },
   {
     title: "Settings",

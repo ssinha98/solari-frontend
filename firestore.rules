@@ -2,28 +2,112 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Users collection - users can read and write their own document
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userTeamId() {
+      return isSignedIn()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.teamId
+        : null;
+    }
+
+    function isTeamMember(teamId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/teams/$(teamId)/users/$(request.auth.uid));
+    }
+
+    function isTeamAdmin(teamId) {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/teams/$(teamId)/users/$(request.auth.uid)).data.role == "admin";
+    }
+
+    // 👤 Users collection
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-      
-      // Agents subcollection - users can read and write their own agents
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+
       match /agents/{agentId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-        
-        // Sources subcollection - users can read and write their own sources
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+
+        match /ratings/{ratingId} {
+          allow read, write: if isSignedIn() && request.auth.uid == userId;
+        }
+
         match /sources/{sourceId} {
-          allow read, write: if request.auth != null && request.auth.uid == userId;
+          allow read, write: if isSignedIn() && request.auth.uid == userId;
+        }
+
+        match /slack_sync_batches/{batchId} {
+          allow read: if isSignedIn() && request.auth.uid == userId;
+          allow write: if false;
         }
       }
-      
-      // Sources subcollection under user - users can read and write their own sources
+
+      match /slack_installations/{installationId} {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+        allow write: if false;
+      }
+
       match /sources/{sourceId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
       }
     }
-    
-    // Default: deny all other access
+
+    // 🧩 Teams collection
+    match /teams/{teamId} {
+      allow create: if isSignedIn();
+
+      // allow access if member or creator (avoids race on users/{uid}.teamId)
+      allow read, update, delete: if
+        isTeamMember(teamId)
+        || resource.data.createdBy == request.auth.uid
+        || userTeamId() == teamId;
+
+      match /users/{userId} {
+        // self can write own membership doc
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+
+      // 📦 Team-level sources
+      match /sources/{sourceId} {
+        allow read, write: if isTeamMember(teamId);
+      }
+
+      // 🤖 Agents collection
+      match /agents/{agentId} {
+        allow read: if
+          isTeamMember(teamId)
+          || resource.data.createdBy == request.auth.uid
+          || userTeamId() == teamId;
+
+        // admins can write agent docs
+        allow write: if isTeamAdmin(teamId);
+
+        match /agent-members/{memberId} {
+          // only team members can read agent members
+          allow read: if isTeamMember(teamId);
+
+          // only team admins can change agent membership
+          allow create, update, delete: if isTeamAdmin(teamId);
+        }
+
+        match /sources/{sourceId} {
+          allow read, write: if isTeamMember(teamId);
+        }
+
+        match /ratings/{ratingId} {
+          allow read, write: if isTeamMember(teamId);
+        }
+
+        match /slack_sync_batches/{batchId} {
+          allow read: if isTeamMember(teamId);
+          allow write: if false;
+        }
+      }
+    }
+
+    // 🚫 Default deny
     match /{document=**} {
       allow read, write: if false;
     }

@@ -1,0 +1,178 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { onAuthStateChanged } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/components/ui/command";
+import { useSidebar } from "@/components/ui/sidebar";
+import { getTeamAgents, type Agent } from "@/tools/agent_tools";
+import { auth, db } from "@/tools/firebase";
+
+const PAGE_ITEMS = [
+  { label: "Agents", href: "/" },
+  { label: "Members", href: "/members" },
+  { label: "Settings", href: "/settings" },
+];
+
+const isTextInputElement = (element: Element | null) => {
+  if (!element) {
+    return false;
+  }
+
+  const tagName = element.tagName.toLowerCase();
+  if (tagName === "input" || tagName === "textarea" || tagName === "select") {
+    return true;
+  }
+
+  if ((element as HTMLElement).isContentEditable) {
+    return true;
+  }
+
+  return (element as HTMLElement).getAttribute("role") === "textbox";
+};
+
+export function GlobalCommandMenu() {
+  const router = useRouter();
+  const { toggleSidebar } = useSidebar();
+  const [open, setOpen] = useState(false);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [isLoadingAgents, setIsLoadingAgents] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!isMounted) {
+        return;
+      }
+
+      if (!user) {
+        setAgents([]);
+        setIsLoadingAgents(false);
+        return;
+      }
+
+      setIsLoadingAgents(true);
+      try {
+        const userSnap = await getDoc(doc(db, "users", user.uid));
+        const teamId = userSnap.exists()
+          ? (userSnap.data().teamId as string | undefined)
+          : undefined;
+
+        if (!teamId) {
+          setAgents([]);
+          return;
+        }
+
+        const teamAgents = await getTeamAgents(teamId, user.uid, {
+          includeAllForAdmins: true,
+        });
+        if (isMounted) {
+          setAgents(teamAgents);
+        }
+      } catch (error) {
+        console.error("Failed to fetch agents for command menu:", error);
+      } finally {
+        if (isMounted) {
+          setIsLoadingAgents(false);
+        }
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isTextInputElement(document.activeElement)) {
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setOpen(true);
+        return;
+      }
+
+      if (event.metaKey && event.key === "/") {
+        event.preventDefault();
+        toggleSidebar();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [toggleSidebar]);
+
+  const agentItems = useMemo(
+    () =>
+      agents.map((agent) => ({
+        id: agent.id,
+        label: agent.name || `${agent.type} agent`,
+        value: `${agent.name ?? ""} ${agent.type}`.trim(),
+      })),
+    [agents]
+  );
+
+  const handleNavigate = (href: string) => {
+    router.push(href);
+    setOpen(false);
+  };
+
+  const handleAgentNavigate = (agentId: string) => {
+    const params = new URLSearchParams({ id: agentId });
+    router.push(`/chatAgent?${params.toString()}`);
+    setOpen(false);
+  };
+
+  return (
+    <CommandDialog open={open} onOpenChange={setOpen}>
+      <CommandInput placeholder="Search pages and agents..." />
+      <CommandList>
+        <CommandEmpty>No results found.</CommandEmpty>
+        <CommandGroup heading="Agents">
+          {isLoadingAgents ? (
+            <CommandItem disabled>Loading agents...</CommandItem>
+          ) : agentItems.length > 0 ? (
+            agentItems.map((agent) => (
+              <CommandItem
+                key={agent.id}
+                value={agent.value}
+                onSelect={() => handleAgentNavigate(agent.id)}
+              >
+                {agent.label}
+              </CommandItem>
+            ))
+          ) : (
+            <CommandItem disabled>No agents found.</CommandItem>
+          )}
+        </CommandGroup>
+        <CommandSeparator />
+        <CommandGroup heading="Pages">
+          {PAGE_ITEMS.map((item) => (
+            <CommandItem
+              key={item.href}
+              value={item.label}
+              onSelect={() => handleNavigate(item.href)}
+            >
+              {item.label}
+            </CommandItem>
+          ))}
+        </CommandGroup>
+      </CommandList>
+    </CommandDialog>
+  );
+}

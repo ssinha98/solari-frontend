@@ -8,9 +8,11 @@ import {
   where,
   doc,
   updateDoc,
+  setDoc,
   deleteDoc,
   serverTimestamp,
   Timestamp,
+  arrayUnion,
 } from "firebase/firestore";
 import {
   ref,
@@ -46,16 +48,48 @@ export interface Source {
  * @param type - The type of agent to create
  * @returns Promise that resolves with the agent document ID
  */
-export async function createAgent(type: AgentType): Promise<string> {
+export async function createAgent(
+  type: AgentType,
+  teamId: string,
+  userId: string
+): Promise<string> {
   try {
     const user = auth.currentUser;
     if (!user) {
       throw new Error("User must be authenticated to create an agent");
     }
 
-    const agentsRef = collection(db, "users", user.uid, "agents");
+    const agentsRef = collection(db, "teams", teamId, "agents");
     const docRef = await addDoc(agentsRef, {
       type,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    await updateDoc(doc(db, "teams", teamId, "users", userId), {
+      agents: arrayUnion({
+        agent_id: docRef.id,
+        agent_name: type,
+        role: "admin",
+      }),
+      updatedAt: serverTimestamp(),
+    });
+
+    const agentMemberRef = doc(
+      db,
+      "teams",
+      teamId,
+      "agents",
+      docRef.id,
+      "agent-members",
+      userId
+    );
+    await setDoc(agentMemberRef, {
+      uid: userId,
+      email: user.email,
+      displayName: user.displayName,
+      photoURL: user.photoURL,
+      role: "admin",
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -71,26 +105,63 @@ export async function createAgent(type: AgentType): Promise<string> {
  * Fetches all agents for the current user
  * @returns Promise that resolves with an array of agent documents
  */
-export async function getUserAgents(): Promise<Agent[]> {
+export async function getTeamAgents(
+  teamId: string,
+  userId: string,
+  options?: { includeAllForAdmins?: boolean }
+): Promise<Agent[]> {
   try {
     const user = auth.currentUser;
     if (!user) {
       throw new Error("User must be authenticated to fetch agents");
     }
 
-    const agentsRef = collection(db, "users", user.uid, "agents");
+    let isAdmin = false;
+    if (options?.includeAllForAdmins) {
+      const teamUserSnap = await getDoc(doc(db, "teams", teamId, "users", userId));
+      if (teamUserSnap.exists()) {
+        const role = teamUserSnap.data().role as string | undefined;
+        isAdmin = role === "admin";
+      }
+    }
+
+    const agentsRef = collection(db, "teams", teamId, "agents");
     const q = query(agentsRef, orderBy("createdAt", "desc"));
     const querySnapshot = await getDocs(q);
 
-    const agents: Agent[] = [];
-    querySnapshot.forEach((doc) => {
-      agents.push({
-        id: doc.id,
-        ...doc.data(),
-      } as Agent);
-    });
+    if (isAdmin) {
+      return querySnapshot.docs.map(
+        (docSnap) =>
+          ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          }) as Agent
+      );
+    }
 
-    return agents;
+    const agents = await Promise.all(
+      querySnapshot.docs.map(async (docSnap) => {
+        const memberRef = doc(
+          db,
+          "teams",
+          teamId,
+          "agents",
+          docSnap.id,
+          "agent-members",
+          userId
+        );
+        const memberSnap = await getDoc(memberRef);
+        if (!memberSnap.exists()) {
+          return null;
+        }
+        return {
+          id: docSnap.id,
+          ...docSnap.data(),
+        } as Agent;
+      })
+    );
+
+    return agents.filter(Boolean) as Agent[];
   } catch (error) {
     console.error("Error fetching agents:", error);
     throw error;
@@ -113,11 +184,38 @@ export async function updateAgentName(
       throw new Error("User must be authenticated to update an agent");
     }
 
-    const agentRef = doc(db, "users", user.uid, "agents", agentId);
+    const userRef = doc(db, "users", user.uid);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) {
+      throw new Error("User document not found");
+    }
+    const teamId = userSnap.data().teamId as string | undefined;
+    if (!teamId) {
+      throw new Error("Team ID not found");
+    }
+
+    const agentRef = doc(db, "teams", teamId, "agents", agentId);
     await updateDoc(agentRef, {
       name,
       updatedAt: serverTimestamp(),
     });
+
+    const teamUserRef = doc(db, "teams", teamId, "users", user.uid);
+    const teamUserSnap = await getDoc(teamUserRef);
+    if (teamUserSnap.exists()) {
+      const data = teamUserSnap.data();
+      const agents = Array.isArray(data.agents) ? data.agents : [];
+      const updatedAgents = agents.map(
+        (agent: { agent_id?: string; agent_name?: string; role?: string }) =>
+          agent.agent_id === agentId
+            ? { ...agent, agent_name: name }
+            : agent
+      );
+      await updateDoc(teamUserRef, {
+        agents: updatedAgents,
+        updatedAt: serverTimestamp(),
+      });
+    }
   } catch (error) {
     console.error("Error updating agent name:", error);
     throw error;
@@ -129,7 +227,10 @@ export async function updateAgentName(
  * @param agentId - The ID of the agent
  * @returns Promise that resolves with an array of source documents
  */
-export async function getAgentSources(agentId: string): Promise<Source[]> {
+export async function getAgentSources(
+  teamId: string,
+  agentId: string
+): Promise<Source[]> {
   try {
     const user = auth.currentUser;
     if (!user) {
@@ -138,8 +239,8 @@ export async function getAgentSources(agentId: string): Promise<Source[]> {
 
     const sourcesRef = collection(
       db,
-      "users",
-      user.uid,
+      "teams",
+      teamId,
       "agents",
       agentId,
       "sources"
@@ -171,6 +272,7 @@ export async function getAgentSources(agentId: string): Promise<Source[]> {
  * @returns Promise that resolves when the operation is complete
  */
 async function addOrUpdateUserSource(
+  teamId: string,
   agentId: string,
   nickname: string,
   type: string,
@@ -185,8 +287,8 @@ async function addOrUpdateUserSource(
     }
 
     // Use the same simple logic as agent's sources subcollection - just add the document
-    const userSourcesRef = collection(db, "users", user.uid, "sources");
-    await addDoc(userSourcesRef, {
+    const teamSourcesRef = collection(db, "teams", teamId, "sources");
+    await addDoc(teamSourcesRef, {
       nickname,
       type,
       name: name || null,
@@ -197,7 +299,7 @@ async function addOrUpdateUserSource(
       updatedAt: serverTimestamp(),
     });
   } catch (error: any) {
-    console.error("Error adding user source:", error);
+    console.error("Error adding team source:", error);
     throw error;
   }
 }
@@ -283,10 +385,26 @@ export async function uploadSourceFile(
     }
 
     const userData = userSnap.data();
-    const namespace = userData.pinecone_namespace;
+    const teamId = userData.teamId as string | undefined;
+
+    if (!teamId) {
+      console.warn("teamId not found in user document");
+      return storagePath;
+    }
+
+    const teamRef = doc(db, "teams", teamId);
+    const teamSnap = await getDoc(teamRef);
+
+    if (!teamSnap.exists()) {
+      console.warn("team document not found");
+      return storagePath;
+    }
+
+    const teamData = teamSnap.data();
+    const namespace = teamData.pinecone_namespace;
 
     if (!namespace) {
-      console.warn("pinecone_namespace not found in user document");
+      console.warn("pinecone_namespace not found in team document");
       // Still return the file path even if namespace is missing
       return storagePath;
     }
@@ -326,6 +444,7 @@ export async function uploadSourceFile(
  * @returns Promise that resolves with the source document ID
  */
 export async function addAgentSource(
+  teamId: string,
   agentId: string,
   nickname: string,
   type: string,
@@ -342,11 +461,11 @@ export async function addAgentSource(
   try {
     // Add source to agent's sources subcollection
     console.log("Step 1: Adding source to agent's subcollection...");
-    console.log("Path: users/", user.uid, "/agents/", agentId, "/sources");
+    console.log("Path: teams/", teamId, "/agents/", agentId, "/sources");
     const sourcesRef = collection(
       db,
-      "users",
-      user.uid,
+      "teams",
+      teamId,
       "agents",
       agentId,
       "sources"
@@ -376,6 +495,7 @@ export async function addAgentSource(
     console.log("Step 2: Adding source to user's subcollection...");
     console.log("Path: users/", user.uid, "/sources");
     await addOrUpdateUserSource(
+      teamId,
       agentId,
       nickname,
       type,
@@ -383,14 +503,14 @@ export async function addAgentSource(
       filePath,
       description
     );
-    console.log("✓ Successfully added to user's sources subcollection");
+    console.log("✓ Successfully added to team's sources subcollection");
   } catch (error: any) {
-    console.error("✗ FAILED at Step 2 (adding to user's sources):", error);
+    console.error("✗ FAILED at Step 2 (adding to team's sources):", error);
     console.error("Error code:", error?.code);
     console.error("Full error:", error);
     // Don't throw here - we already added to agent's sources, so log but continue
     console.warn(
-      "Warning: Source added to agent but failed to update user's sources collection"
+      "Warning: Source added to agent but failed to update team's sources collection"
     );
   }
 
@@ -407,6 +527,7 @@ export async function addAgentSource(
  * @returns Promise that resolves when the update is complete
  */
 export async function updateSourceNickname(
+  teamId: string,
   agentId: string,
   sourceId: string,
   newNickname: string,
@@ -422,8 +543,8 @@ export async function updateSourceNickname(
     // Update in agent's sources subcollection
     const agentSourceRef = doc(
       db,
-      "users",
-      user.uid,
+      "teams",
+      teamId,
       "agents",
       agentId,
       "sources",
@@ -435,7 +556,7 @@ export async function updateSourceNickname(
     });
 
     // Find and update in user's sources subcollection
-    const userSourcesRef = collection(db, "users", user.uid, "sources");
+    const userSourcesRef = collection(db, "teams", teamId, "sources");
     const q = query(
       userSourcesRef,
       where("nickname", "==", oldNickname),
@@ -449,7 +570,7 @@ export async function updateSourceNickname(
       const agentsArray = data.agents || [];
 
       if (agentsArray.includes(agentId)) {
-        const userSourceRef = doc(db, "users", user.uid, "sources", docSnap.id);
+        const userSourceRef = doc(db, "teams", teamId, "sources", docSnap.id);
         await updateDoc(userSourceRef, {
           nickname: newNickname,
           updatedAt: serverTimestamp(),
@@ -473,6 +594,7 @@ export async function updateSourceNickname(
  * @returns Promise that resolves when the update is complete
  */
 export async function updateSourceDescription(
+  teamId: string,
   agentId: string,
   sourceId: string,
   newDescription: string,
@@ -488,8 +610,8 @@ export async function updateSourceDescription(
     // Update in agent's sources subcollection
     const agentSourceRef = doc(
       db,
-      "users",
-      user.uid,
+      "teams",
+      teamId,
       "agents",
       agentId,
       "sources",
@@ -501,7 +623,7 @@ export async function updateSourceDescription(
     });
 
     // Find and update in user's sources subcollection
-    const userSourcesRef = collection(db, "users", user.uid, "sources");
+    const userSourcesRef = collection(db, "teams", teamId, "sources");
     const q = query(
       userSourcesRef,
       where("nickname", "==", nickname),
@@ -515,7 +637,7 @@ export async function updateSourceDescription(
       const agentsArray = data.agents || [];
 
       if (agentsArray.includes(agentId)) {
-        const userSourceRef = doc(db, "users", user.uid, "sources", docSnap.id);
+        const userSourceRef = doc(db, "teams", teamId, "sources", docSnap.id);
         await updateDoc(userSourceRef, {
           description: newDescription || null,
           updatedAt: serverTimestamp(),
@@ -538,6 +660,7 @@ export async function updateSourceDescription(
  * @returns Promise that resolves when the deletion is complete
  */
 export async function deleteSource(
+  teamId: string,
   agentId: string,
   sourceId: string,
   nickname: string,
@@ -552,17 +675,47 @@ export async function deleteSource(
     // Delete from agent's sources subcollection
     const agentSourceRef = doc(
       db,
-      "users",
-      user.uid,
+      "teams",
+      teamId,
       "agents",
       agentId,
       "sources",
       sourceId
     );
+
+    // If this is a Slack channel source, delete the transcript_chunks subcollection first
+    if (type === "slack_channel") {
+      try {
+        const transcriptChunksRef = collection(
+          db,
+          "teams",
+          teamId,
+          "agents",
+          agentId,
+          "sources",
+          sourceId,
+          "transcript_chunks"
+        );
+        const transcriptChunksSnapshot = await getDocs(transcriptChunksRef);
+        
+        // Delete all documents in the transcript_chunks subcollection
+        const deletePromises = transcriptChunksSnapshot.docs.map((chunkDoc) =>
+          deleteDoc(doc(transcriptChunksRef, chunkDoc.id))
+        );
+        await Promise.all(deletePromises);
+        console.log(
+          `✓ Deleted ${transcriptChunksSnapshot.docs.length} transcript chunk(s)`
+        );
+      } catch (error) {
+        console.error("Error deleting transcript_chunks subcollection:", error);
+        // Continue with source deletion even if subcollection deletion fails
+      }
+    }
+
     await deleteDoc(agentSourceRef);
 
     // Find and update/delete from user's sources subcollection
-    const userSourcesRef = collection(db, "users", user.uid, "sources");
+    const userSourcesRef = collection(db, "teams", teamId, "sources");
     const q = query(
       userSourcesRef,
       where("nickname", "==", nickname),
@@ -576,7 +729,7 @@ export async function deleteSource(
       const agentsArray = data.agents || [];
 
       if (agentsArray.includes(agentId)) {
-        const userSourceRef = doc(db, "users", user.uid, "sources", docSnap.id);
+        const userSourceRef = doc(db, "teams", teamId, "sources", docSnap.id);
 
         // If this is the only agent, delete the document
         if (agentsArray.length === 1) {
@@ -606,6 +759,7 @@ export async function deleteSource(
  * @returns Promise that resolves when the deletion is complete
  */
 export async function deleteTableSource(
+  teamId: string,
   agentId: string,
   sourceId: string,
   nickname: string,
@@ -632,8 +786,8 @@ export async function deleteTableSource(
     // Delete from agent's sources subcollection
     const agentSourceRef = doc(
       db,
-      "users",
-      user.uid,
+      "teams",
+      teamId,
       "agents",
       agentId,
       "sources",
@@ -643,7 +797,7 @@ export async function deleteTableSource(
     console.log("✓ Deleted from agent's sources");
 
     // Find and delete from user's sources subcollection
-    const userSourcesRef = collection(db, "users", user.uid, "sources");
+    const userSourcesRef = collection(db, "teams", teamId, "sources");
     const q = query(
       userSourcesRef,
       where("nickname", "==", nickname),
@@ -656,7 +810,7 @@ export async function deleteTableSource(
       const agentsArray = data.agents || [];
 
       if (agentsArray.includes(agentId)) {
-        const userSourceRef = doc(db, "users", user.uid, "sources", docSnap.id);
+        const userSourceRef = doc(db, "teams", teamId, "sources", docSnap.id);
 
         // If this is the only agent, delete the document
         if (agentsArray.length === 1) {

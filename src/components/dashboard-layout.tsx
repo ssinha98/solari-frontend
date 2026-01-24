@@ -3,13 +3,14 @@
 import { Suspense, useState } from "react";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
+import { GlobalCommandMenu } from "@/components/global-command-menu";
 import {
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
-import { Pencil, Loader2 } from "lucide-react";
+import { Book, Pencil, Loader2 } from "lucide-react";
 import { updateAgentName } from "@/tools/agent_tools";
 import {
   Dialog,
@@ -22,14 +23,17 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { IoIosHelpCircleOutline } from "react-icons/io";
 
 const pageTitles: Record<string, string> = {
   "/": "Agents",
-  "/projects": "Projects",
+  "/members": "Members & Permissions",
   "/settings": "Settings",
+  "/settings/jira_callback": "Manage Jira",
   "/workflowAgent": "Workflow Agent",
   "/chatAgent": "Chat Agent",
   "/copilotAgent": "Copilot Agent",
+  "/agent-analytics": "Agent Analytics",
 };
 
 function DashboardHeader() {
@@ -50,6 +54,7 @@ function DashboardHeader() {
     "/copilotAgent",
   ].includes(pathname);
   const isExistingAgent = isAgentPage && agentId && agentName;
+  const isEditMode = isAgentPage && searchParams.get("edit") === "true";
   const pageTitle =
     isAgentPage && agentName ? agentName : pageTitles[pathname] || "Page";
 
@@ -88,6 +93,13 @@ function DashboardHeader() {
     }
   };
 
+  const handleHeaderAction = (action: "documentation" | "help") => {
+    // Placeholder for page-specific behavior
+    console.log("[DashboardHeader]", action, "clicked on", pathname, {
+      editMode: isEditMode,
+    });
+  };
+
   return (
     <>
       <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
@@ -104,6 +116,24 @@ function DashboardHeader() {
         ) : (
           <h1 className="text-xl font-semibold">{pageTitle}</h1>
         )}
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            size="lg"
+            className="gap-2 bg-[#14281D] text-white hover:bg-[#1b3828]"
+            onClick={() => handleHeaderAction("documentation")}
+          >
+            <Book className="h-4 w-4" />
+            Documentation
+          </Button>
+          <Button
+            size="lg"
+            className="gap-2 bg-blue-900/80 text-white hover:bg-blue-900"
+            onClick={() => handleHeaderAction("help")}
+          >
+            <IoIosHelpCircleOutline className="h-5 w-5" />
+            Get help
+          </Button>
+        </div>
       </header>
 
       <Dialog open={showEditDialog} onOpenChange={handleDialogClose}>
@@ -164,6 +194,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <SidebarProvider>
       <AppSidebar />
+      <GlobalCommandMenu />
       <SidebarInset>
         <Suspense
           fallback={

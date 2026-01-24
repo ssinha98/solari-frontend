@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import type { ComponentPropsWithoutRef } from "react";
 import {
   FileText,
   File,
@@ -9,17 +10,24 @@ import {
   Send,
   X,
   Menu,
+  ThumbsUp,
+  ThumbsDown,
+  Check,
+  Loader2,
 } from "lucide-react";
 import { IoIosDocument } from "react-icons/io";
 import { IoDocuments } from "react-icons/io5";
 import { CiGlobe, CiViewTable } from "react-icons/ci";
+import { MdOutlineNotes } from "react-icons/md";
 import { Button } from "@/components/ui/button";
 import Image from "next/image";
 import { getAgentSources } from "@/tools/agent_tools";
 import { askPinecone, confirmSource, AskPineconeResponse } from "@/tools/api";
 import { auth, db } from "@/tools/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 import { CustomEditor } from "@/components/custom-editor";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -28,6 +36,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Accordion,
   AccordionContent,
@@ -65,7 +79,7 @@ function getFileTypeIcon(source: { type?: string; name?: string }) {
           className="h-4 w-4"
         />
       );
-    case "confluence":
+    case "confluence_page":
       return (
         <Image
           src="https://img.icons8.com/?size=100&id=h8EoAfgRDYLo&format=png&color=000000"
@@ -75,7 +89,7 @@ function getFileTypeIcon(source: { type?: string; name?: string }) {
           className="h-4 w-4"
         />
       );
-    case "slack":
+    case "slack_channel":
       return (
         <Image
           src="https://img.icons8.com/?size=100&id=4n94I13nDTyw&format=png&color=000000"
@@ -193,7 +207,7 @@ function renderTextWithMentions(text: string, mentionLabels: string[] = []) {
     const overlaps = nonOverlappingMatches.some(
       (existing) =>
         match.index < existing.index + existing.length &&
-        match.index + match.length > existing.index
+        match.index + match.length > existing.index,
     );
     if (!overlaps) {
       nonOverlappingMatches.push(match);
@@ -215,7 +229,7 @@ function renderTextWithMentions(text: string, mentionLabels: string[] = []) {
         style={{ color: "#303AAF" }}
       >
         {match.text}
-      </span>
+      </span>,
     );
 
     lastIndex = match.index + match.length;
@@ -240,13 +254,18 @@ interface Message {
     rows: Array<Record<string, any>>;
     rows_returned?: number;
   };
+  feedback?: "up" | "down";
+  ratingDocId?: string;
+  notes?: string;
   pendingConfirmation?: {
     chosenNickname: string;
+    sourceSuggestion: string;
     countdown: number;
     query: string;
     namespace: string;
     agentId: string;
     userId: string;
+    requestId: string;
   };
 }
 
@@ -262,13 +281,180 @@ export function RunChat({ agentId }: { agentId: string | null }) {
   const [selectedMetadata, setSelectedMetadata] = useState<
     AskPineconeResponse["metadata"] | null
   >(null);
+  const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+  const [noteMessageId, setNoteMessageId] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState("");
   const [agentName, setAgentName] = useState<string>("");
+  const [teamId, setTeamId] = useState<string | null>(null);
   const [sourceSelectionDialogOpen, setSourceSelectionDialogOpen] =
     useState(false);
   const [pendingConfirmationMessageId, setPendingConfirmationMessageId] =
     useState<string | null>(null);
+  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
+  const [confirmingSourceId, setConfirmingSourceId] = useState<string | null>(
+    null,
+  );
   const countdownTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const editorRef = useRef<any>(null);
+
+  const createRatingDoc = async (
+    ratingDocId: string,
+    question: string,
+    answer: string,
+    finalSource: string,
+    suggestedSource: string,
+    sourceProvided: boolean,
+  ): Promise<string | null> => {
+    const user = auth.currentUser;
+    if (!user || !agentId || !teamId) return null;
+
+    try {
+      const ratingRef = doc(
+        db,
+        "teams",
+        teamId,
+        "agents",
+        agentId,
+        "ratings",
+        ratingDocId,
+      );
+      await setDoc(
+        ratingRef,
+        {
+          question,
+          answer,
+          final_source: finalSource,
+          suggested_source: suggestedSource,
+          source_provided: sourceProvided,
+          rating: "",
+        },
+        { merge: true },
+      );
+      return ratingDocId;
+    } catch (error) {
+      console.error("Failed to create rating document:", error);
+      return null;
+    }
+  };
+
+  const toggleMessageFeedback = async (
+    messageId: string,
+    feedback: "up" | "down",
+  ) => {
+    const user = auth.currentUser;
+    if (!user || !agentId || !teamId) return;
+
+    const targetMessage = messages.find((msg) => msg.id === messageId);
+    if (!targetMessage?.ratingDocId) return;
+
+    const nextRating = targetMessage.feedback === feedback ? "" : feedback;
+
+    setMessages((prevMessages) =>
+      prevMessages.map((msg) =>
+        msg.id === messageId
+          ? {
+              ...msg,
+              feedback: nextRating ? (nextRating as "up" | "down") : undefined,
+            }
+          : msg,
+      ),
+    );
+
+    try {
+      const ratingRef = doc(
+        db,
+        "teams",
+        teamId,
+        "agents",
+        agentId,
+        "ratings",
+        targetMessage.ratingDocId,
+      );
+      await updateDoc(ratingRef, { rating: nextRating });
+    } catch (error) {
+      console.error("Failed to update rating:", error);
+    }
+  };
+
+  const openNotesDialog = (msg: Message) => {
+    setNoteMessageId(msg.id);
+    setNoteText(msg.notes || "");
+    setNoteDialogOpen(true);
+  };
+
+  const handleSaveNote = async () => {
+    const user = auth.currentUser;
+    if (!user || !agentId || !teamId || !noteMessageId) return;
+
+    const targetMessage = messages.find((msg) => msg.id === noteMessageId);
+    if (!targetMessage?.ratingDocId) return;
+
+    try {
+      const ratingRef = doc(
+        db,
+        "teams",
+        teamId,
+        "agents",
+        agentId,
+        "ratings",
+        targetMessage.ratingDocId,
+      );
+      await updateDoc(ratingRef, { notes: noteText });
+      setMessages((prevMessages) =>
+        prevMessages.map((msg) =>
+          msg.id === noteMessageId ? { ...msg, notes: noteText } : msg,
+        ),
+      );
+      setNoteDialogOpen(false);
+      setNoteMessageId(null);
+      setNoteText("");
+    } catch (error) {
+      console.error("Failed to save note:", error);
+    }
+  };
+
+  // const toggleMessageFeedback = async (
+  //   messageId: string,
+  //   feedback: "up" | "down"
+  // ) => {
+  //   const user = auth.currentUser;
+  //   if (!user || !agentId) return;
+
+  //   let nextRating = "";
+  //   let ratingDocId: string | undefined;
+
+  //   setMessages((prevMessages) =>
+  //     prevMessages.map((msg) => {
+  //       if (msg.id !== messageId) {
+  //         return msg;
+  //       }
+
+  //       nextRating = msg.feedback === feedback ? "" : feedback;
+  //       ratingDocId = msg.ratingDocId;
+  //       return {
+  //         ...msg,
+  //         feedback: nextRating ? (nextRating as "up" | "down") : undefined,
+  //       };
+  //     })
+  //   );
+
+  //   if (!ratingDocId) return;
+
+  //   try {
+  //     const ratingRef = doc(
+  //       db,
+  //       "users",
+  //       user.uid,
+  //       "agents",
+  //       agentId,
+  //       "ratings",
+  //       ratingDocId
+  //     );
+  //     await updateDoc(ratingRef, { rating: nextRating });
+  //   } catch (error) {
+  //     console.error("Failed to update rating:", error);
+  //   }
+  // };
 
   // Helper function to extract mention nickname from message text
   const extractMentionNickname = (text: string): string | undefined => {
@@ -336,6 +522,8 @@ export function RunChat({ agentId }: { agentId: string | null }) {
       return;
     }
 
+    const requestId = crypto.randomUUID();
+
     const newMessage: Message = {
       id: Date.now().toString(),
       role: "user",
@@ -347,19 +535,25 @@ export function RunChat({ agentId }: { agentId: string | null }) {
     setIsLoadingResponse(true);
 
     try {
-      // Get user's pinecone_namespace from Firestore
-      const userRef = doc(db, "users", user.uid);
-      const userSnap = await getDoc(userRef);
-
-      if (!userSnap.exists()) {
-        throw new Error("User document not found");
+      if (!teamId) {
+        throw new Error("Team ID not found");
       }
 
-      const userData = userSnap.data();
-      const namespace = userData.pinecone_namespace;
+      // Get team pinecone_namespace from Firestore
+      console.log("handleSend: using teamId", teamId);
+      const teamRef = doc(db, "teams", teamId);
+      const teamSnap = await getDoc(teamRef);
+
+      if (!teamSnap.exists()) {
+        throw new Error("Team document not found");
+      }
+
+      const teamData = teamSnap.data();
+      console.log("handleSend: team data", teamData);
+      const namespace = teamData.pinecone_namespace;
 
       if (!namespace) {
-        throw new Error("pinecone_namespace not found in user document");
+        throw new Error("pinecone_namespace not found in team document");
       }
 
       // Extract mention nickname if present
@@ -387,10 +581,12 @@ export function RunChat({ agentId }: { agentId: string | null }) {
 
       const response = await askPinecone(
         user.uid,
+        teamId,
         namespace,
         content,
         agentId,
-        nickname
+        nickname,
+        requestId,
       );
 
       // Check if response needs source confirmation
@@ -407,11 +603,13 @@ export function RunChat({ agentId }: { agentId: string | null }) {
           content: `Using '${response.chosen_nickname}' to answer question. Doesn't look right? Choose another source in 5 seconds.`,
           pendingConfirmation: {
             chosenNickname: response.chosen_nickname,
+            sourceSuggestion: response.chosen_nickname,
             countdown: 5,
             query: content,
             namespace: namespace,
             agentId: agentId,
             userId: user.uid,
+            requestId: response.requestId || requestId,
           },
         };
 
@@ -419,13 +617,25 @@ export function RunChat({ agentId }: { agentId: string | null }) {
         setPendingConfirmationMessageId(confirmationMessageId);
       } else if (response.response_summarized || response.answer) {
         // Direct answer - display immediately (prioritize response_summarized for table sources)
+        const messageId = (Date.now() + 1).toString();
+        const answerText =
+          response.response_summarized || response.answer || "";
+        const ratingDocId = await createRatingDoc(
+          response.requestId || requestId,
+          content,
+          answerText,
+          response.chosen_nickname || "",
+          response.chosen_nickname || "",
+          true,
+        );
         const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
+          id: messageId,
           role: "assistant",
-          content: response.response_summarized || response.answer || "",
+          content: answerText,
           metadata: response.metadata,
           sql: response.sql,
           table: response.table,
+          ratingDocId: ratingDocId || response.requestId || requestId,
         };
 
         setMessages((prev) => [...prev, assistantMessage]);
@@ -459,8 +669,14 @@ export function RunChat({ agentId }: { agentId: string | null }) {
     originalQuery: string,
     namespace: string,
     agentId: string,
-    userId: string
+    userId: string,
+    requestId: string,
+    sourceSuggestion: string,
   ) => {
+    if (!teamId) {
+      console.error("Team ID not found");
+      return;
+    }
     // Clear any active countdown for this message
     const timer = countdownTimersRef.current.get(messageId);
     if (timer) {
@@ -472,10 +688,25 @@ export function RunChat({ agentId }: { agentId: string | null }) {
     try {
       const response = await confirmSource(
         userId,
+        teamId,
         namespace,
         originalQuery,
         chosenNickname,
-        agentId
+        agentId,
+        requestId,
+        sourceSuggestion,
+      );
+      const answerText =
+        response.response_summarized ||
+        response.answer ||
+        "No answer provided.";
+      const ratingDocId = await createRatingDoc(
+        response.requestId || requestId,
+        originalQuery,
+        answerText,
+        response.chosen_nickname || chosenNickname || "",
+        response.suggestedSource || sourceSuggestion || "",
+        false,
       );
 
       setMessages((prevMessages) =>
@@ -483,17 +714,15 @@ export function RunChat({ agentId }: { agentId: string | null }) {
           msg.id === messageId
             ? {
                 ...msg,
-                content:
-                  response.response_summarized ||
-                  response.answer ||
-                  "No answer provided.",
+                content: answerText,
                 metadata: response.metadata,
                 sql: response.sql,
                 table: response.table,
+                ratingDocId: ratingDocId || msg.ratingDocId,
                 pendingConfirmation: undefined, // Clear pending state
               }
-            : msg
-        )
+            : msg,
+        ),
       );
     } catch (error) {
       console.error("Failed to confirm source:", error);
@@ -505,13 +734,15 @@ export function RunChat({ agentId }: { agentId: string | null }) {
                 content: `Error confirming source: ${error instanceof Error ? error.message : "Unknown error"}`,
                 pendingConfirmation: undefined,
               }
-            : msg
-        )
+            : msg,
+        ),
       );
     } finally {
       setIsLoadingResponse(false);
       setSourceSelectionDialogOpen(false);
       setPendingConfirmationMessageId(null);
+      setSelectedSourceId(null);
+      setConfirmingSourceId(null);
     }
   };
 
@@ -525,7 +756,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
       currentCountdown -= 1;
       setMessages((prevMessages) => {
         const message = prevMessages.find(
-          (m) => m.id === pendingConfirmationMessageId
+          (m) => m.id === pendingConfirmationMessageId,
         );
         if (!message || !message.pendingConfirmation) {
           clearInterval(timer);
@@ -543,7 +774,9 @@ export function RunChat({ agentId }: { agentId: string | null }) {
             message.pendingConfirmation.query,
             message.pendingConfirmation.namespace,
             message.pendingConfirmation.agentId,
-            message.pendingConfirmation.userId
+            message.pendingConfirmation.userId,
+            message.pendingConfirmation.requestId,
+            message.pendingConfirmation.sourceSuggestion,
           );
           setPendingConfirmationMessageId(null);
           return prevMessages;
@@ -558,7 +791,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
                   countdown: currentCountdown,
                 },
               }
-            : msg
+            : msg,
         );
       });
     }, 1000);
@@ -569,7 +802,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
     return () => {
       if (countdownTimersRef.current.has(pendingConfirmationMessageId)) {
         clearInterval(
-          countdownTimersRef.current.get(pendingConfirmationMessageId)!
+          countdownTimersRef.current.get(pendingConfirmationMessageId)!,
         );
         countdownTimersRef.current.delete(pendingConfirmationMessageId);
       }
@@ -577,17 +810,40 @@ export function RunChat({ agentId }: { agentId: string | null }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingConfirmationMessageId]);
 
+  useEffect(() => {
+    const fetchTeamId = async () => {
+      const user = auth.currentUser;
+      if (!user) {
+        setTeamId(null);
+        return;
+      }
+
+      try {
+        const userSnap = await getDoc(doc(db, "users", user.uid));
+        const nextTeamId = userSnap.exists()
+          ? (userSnap.data().teamId as string | undefined)
+          : undefined;
+        setTeamId(nextTeamId ?? null);
+      } catch (error) {
+        console.error("Failed to load team ID:", error);
+        setTeamId(null);
+      }
+    };
+
+    fetchTeamId();
+  }, []);
+
   // Fetch sources from Firestore when agentId is available
   useEffect(() => {
     const fetchSources = async () => {
-      if (!agentId) {
+      if (!agentId || !teamId) {
         setCurrentSources([]);
         return;
       }
 
       try {
         setIsLoadingSources(true);
-        const sources = await getAgentSources(agentId);
+        const sources = await getAgentSources(teamId, agentId);
         setCurrentSources(sources);
       } catch (error) {
         console.error("Failed to fetch sources:", error);
@@ -598,12 +854,12 @@ export function RunChat({ agentId }: { agentId: string | null }) {
     };
 
     fetchSources();
-  }, [agentId]);
+  }, [agentId, teamId]);
 
   // Fetch agent name when agentId is available
   useEffect(() => {
     const fetchAgentName = async () => {
-      if (!agentId) {
+      if (!agentId || !teamId) {
         setAgentName("");
         return;
       }
@@ -612,7 +868,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
         const user = auth.currentUser;
         if (!user) return;
 
-        const agentRef = doc(db, "users", user.uid, "agents", agentId);
+        const agentRef = doc(db, "teams", teamId, "agents", agentId);
         const agentSnap = await getDoc(agentRef);
 
         if (agentSnap.exists()) {
@@ -626,7 +882,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
     };
 
     fetchAgentName();
-  }, [agentId]);
+  }, [agentId, teamId]);
 
   return (
     <div className="flex gap-4 h-[calc(100vh-12rem)]">
@@ -714,7 +970,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
                   <div
                     className={`max-w-[80%] rounded-lg p-3 ${
                       msg.role === "user"
-                        ? "bg-primary text-primary-foreground"
+                        ? "bg-[#2D47BC] text-white"
                         : "bg-background border border-border"
                     } ${
                       msg.role === "assistant" && msg.metadata
@@ -762,89 +1018,249 @@ export function RunChat({ agentId }: { agentId: string | null }) {
                       </div>
                     ) : (
                       <>
-                        <p className="text-sm">
-                          {msg.role === "user"
-                            ? renderTextWithMentions(
+                        <div
+                          onClick={(event) => event.stopPropagation()}
+                          onMouseDown={(event) => event.stopPropagation()}
+                        >
+                          {msg.role === "user" ? (
+                            <p className="text-sm">
+                              {renderTextWithMentions(
                                 msg.content,
                                 currentSources.map(
-                                  (s) => s.nickname || s.name || "Untitled"
-                                )
-                              )
-                            : msg.content}
-                        </p>
-                        {msg.role === "assistant" && msg.sql && (
-                          <div className="mt-3">
-                            <p className="text-xs font-medium text-muted-foreground mb-1">
-                              SQL Query:
+                                  (s) => s.nickname || s.name || "Untitled",
+                                ),
+                              )}
                             </p>
-                            <textarea
-                              readOnly
-                              value={msg.sql}
-                              className="w-full p-2 text-xs font-mono bg-muted border rounded-md resize-none"
-                              rows={Math.min(msg.sql.split("\n").length, 10)}
-                            />
-                          </div>
-                        )}
-                        {msg.role === "assistant" &&
-                          msg.table &&
-                          (() => {
-                            const table = msg.table;
-                            return (
-                              <div className="mt-3">
-                                <p className="text-xs font-medium text-muted-foreground mb-2">
-                                  Results:
-                                </p>
-                                <div className="border rounded-md overflow-hidden">
-                                  <Table>
-                                    <TableHeader>
-                                      <TableRow>
-                                        {table.columns.map((column) => (
-                                          <TableHead
-                                            key={column}
-                                            className="text-xs"
-                                          >
-                                            {column}
-                                          </TableHead>
-                                        ))}
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                      {table.rows.map((row, rowIndex) => (
-                                        <TableRow key={rowIndex}>
+                          ) : (
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              className="text-sm whitespace-pre-wrap"
+                              components={{
+                                p: ({
+                                  children,
+                                  ...props
+                                }: ComponentPropsWithoutRef<"p">) => (
+                                  <p className="mb-2 last:mb-0" {...props}>
+                                    {children}
+                                  </p>
+                                ),
+                                ul: ({
+                                  children,
+                                  ...props
+                                }: ComponentPropsWithoutRef<"ul">) => (
+                                  <ul
+                                    className="list-disc pl-5 mb-2 last:mb-0"
+                                    {...props}
+                                  >
+                                    {children}
+                                  </ul>
+                                ),
+                                ol: ({
+                                  children,
+                                  ...props
+                                }: ComponentPropsWithoutRef<"ol">) => (
+                                  <ol
+                                    className="list-decimal pl-5 mb-2 last:mb-0"
+                                    {...props}
+                                  >
+                                    {children}
+                                  </ol>
+                                ),
+                                li: ({
+                                  children,
+                                  ...props
+                                }: ComponentPropsWithoutRef<"li">) => (
+                                  <li className="mb-1 last:mb-0" {...props}>
+                                    {children}
+                                  </li>
+                                ),
+                                code: ({
+                                  children,
+                                  ...props
+                                }: ComponentPropsWithoutRef<"code">) => (
+                                  <code
+                                    className="rounded bg-muted px-1 py-0.5 font-mono text-xs"
+                                    {...props}
+                                  >
+                                    {children}
+                                  </code>
+                                ),
+                                a: ({
+                                  children,
+                                  ...props
+                                }: ComponentPropsWithoutRef<"a">) => (
+                                  <a
+                                    className="text-blue-600 dark:text-blue-400 underline"
+                                    {...props}
+                                  >
+                                    {children}
+                                  </a>
+                                ),
+                              }}
+                            >
+                              {msg.content}
+                            </ReactMarkdown>
+                          )}
+                          {msg.role === "assistant" && msg.sql && (
+                            <div className="mt-3">
+                              <p className="text-xs font-medium text-muted-foreground mb-1">
+                                SQL Query:
+                              </p>
+                              <textarea
+                                readOnly
+                                value={msg.sql}
+                                className="w-full p-2 text-xs font-mono bg-muted border rounded-md resize-none"
+                                rows={Math.min(msg.sql.split("\n").length, 10)}
+                              />
+                            </div>
+                          )}
+                          {msg.role === "assistant" &&
+                            msg.table &&
+                            (() => {
+                              const table = msg.table;
+                              return (
+                                <div className="mt-3">
+                                  <p className="text-xs font-medium text-muted-foreground mb-2">
+                                    Results:
+                                  </p>
+                                  <div className="border rounded-md overflow-hidden">
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow>
                                           {table.columns.map((column) => (
-                                            <TableCell
+                                            <TableHead
                                               key={column}
                                               className="text-xs"
                                             >
-                                              {row[column] !== null &&
-                                              row[column] !== undefined
-                                                ? typeof row[column] ===
-                                                  "number"
-                                                  ? row[column].toLocaleString()
-                                                  : String(row[column])
-                                                : ""}
-                                            </TableCell>
+                                              {column}
+                                            </TableHead>
                                           ))}
                                         </TableRow>
-                                      ))}
-                                    </TableBody>
-                                  </Table>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {table.rows.map((row, rowIndex) => (
+                                          <TableRow key={rowIndex}>
+                                            {table.columns.map((column) => (
+                                              <TableCell
+                                                key={column}
+                                                className="text-xs"
+                                              >
+                                                {row[column] !== null &&
+                                                row[column] !== undefined
+                                                  ? typeof row[column] ===
+                                                    "number"
+                                                    ? row[
+                                                        column
+                                                      ].toLocaleString()
+                                                    : String(row[column])
+                                                  : ""}
+                                              </TableCell>
+                                            ))}
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                  {table.rows_returned !== undefined && (
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      {table.rows_returned} row
+                                      {table.rows_returned !== 1
+                                        ? "s"
+                                        : ""}{" "}
+                                      returned
+                                    </p>
+                                  )}
                                 </div>
-                                {table.rows_returned !== undefined && (
-                                  <p className="text-xs text-muted-foreground mt-1">
-                                    {table.rows_returned} row
-                                    {table.rows_returned !== 1 ? "s" : ""}{" "}
-                                    returned
-                                  </p>
-                                )}
-                              </div>
-                            );
-                          })()}
+                              );
+                            })()}
+                        </div>
                         {msg.role === "assistant" && msg.metadata && (
                           <p className="text-xs text-muted-foreground mt-2">
                             Click to view details
                           </p>
                         )}
+                        {msg.role === "assistant" &&
+                          !msg.pendingConfirmation && (
+                            <div
+                              className="mt-3 flex items-center gap-3"
+                              onClick={(event) => event.stopPropagation()}
+                              onMouseDown={(event) => event.stopPropagation()}
+                            >
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        toggleMessageFeedback(msg.id, "up");
+                                      }}
+                                      className={`rounded-md p-1 transition-colors ${
+                                        msg.feedback === "up"
+                                          ? "text-green-500"
+                                          : "text-muted-foreground hover:text-foreground"
+                                      }`}
+                                      aria-label="thumbs up"
+                                    >
+                                      <ThumbsUp className="h-4 w-4" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="text-xs">
+                                      Rate this response as helpful
+                                    </p>
+                                  </TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        toggleMessageFeedback(msg.id, "down");
+                                      }}
+                                      className={`rounded-md p-1 transition-colors ${
+                                        msg.feedback === "down"
+                                          ? "text-red-500"
+                                          : "text-muted-foreground hover:text-foreground"
+                                      }`}
+                                      aria-label="Thumbs down"
+                                    >
+                                      <ThumbsDown className="h-4 w-4" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="text-xs">
+                                      Rate this response as not helpful
+                                    </p>
+                                  </TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        openNotesDialog(msg);
+                                      }}
+                                      className="relative rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
+                                      aria-label="Add note"
+                                    >
+                                      <MdOutlineNotes className="h-4 w-4" />
+                                      {msg.notes?.trim() ? (
+                                        <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-blue-500" />
+                                      ) : null}
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="text-xs">
+                                      Give the agent feedback on this response
+                                    </p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </div>
+                          )}
                       </>
                     )}
                   </div>
@@ -1063,7 +1479,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
                                     </p>
                                   )}
                                 </div>
-                              )
+                              ),
                             )}
                           </div>
                         </div>
@@ -1076,35 +1492,84 @@ export function RunChat({ agentId }: { agentId: string | null }) {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Notes Dialog */}
+      <AlertDialog
+        open={noteDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setNoteDialogOpen(false);
+            setNoteMessageId(null);
+            setNoteText("");
+          }
+        }}
+      >
+        <AlertDialogContent className="max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Add a note about this response</AlertDialogTitle>
+            <p className="text-sm text-muted-foreground"></p>
+            This helps the agent improve over time.
+          </AlertDialogHeader>
+          <textarea
+            value={noteText}
+            onChange={(event) => setNoteText(event.target.value)}
+            rows={5}
+            className="w-full p-2 text-sm border rounded-md bg-background"
+            placeholder="Add a note..."
+          />
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setNoteDialogOpen(false);
+                setNoteMessageId(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveNote}>Save</Button>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Source Selection Dialog */}
       <AlertDialog
         open={sourceSelectionDialogOpen}
         onOpenChange={(open) => {
           setSourceSelectionDialogOpen(open);
+          if (!open) {
+            setSelectedSourceId(null);
+            setConfirmingSourceId(null);
+          }
           if (!open && pendingConfirmationMessageId) {
             // If dialog is closed without selection, let countdown continue
             // The countdown will auto-confirm when it reaches 0
           }
         }}
       >
-        <AlertDialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Choose a Source</AlertDialogTitle>
-            <AlertDialogDescription>
-              Select a source to use for answering your question
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="space-y-2 py-4">
+        <AlertDialogContent className="max-w-2xl max-h-[80vh] p-0">
+          <div className="sticky top-0 z-10 border-b bg-background px-6 py-4">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Choose a Source</AlertDialogTitle>
+              <AlertDialogDescription>
+                Select a source to use for answering your question
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+          </div>
+          <div className="max-h-[calc(80vh-96px)] space-y-2 overflow-y-auto px-6 py-4">
             {currentSources.length > 0 ? (
               currentSources.map((source) => {
                 const nickname = source.nickname || source.name || "Untitled";
+                const isSelected = selectedSourceId === source.id;
+                const isConfirming = confirmingSourceId === source.id;
                 return (
                   <button
                     key={source.id}
                     onClick={async () => {
                       if (!pendingConfirmationMessageId) return;
+                      setSelectedSourceId(source.id);
+                      setConfirmingSourceId(source.id);
                       const message = messages.find(
-                        (m) => m.id === pendingConfirmationMessageId
+                        (m) => m.id === pendingConfirmationMessageId,
                       );
                       if (!message || !message.pendingConfirmation) return;
 
@@ -1114,16 +1579,27 @@ export function RunChat({ agentId }: { agentId: string | null }) {
                         message.pendingConfirmation.query,
                         message.pendingConfirmation.namespace,
                         message.pendingConfirmation.agentId,
-                        message.pendingConfirmation.userId
+                        message.pendingConfirmation.userId,
+                        message.pendingConfirmation.requestId,
+                        message.pendingConfirmation.sourceSuggestion,
                       );
                     }}
                     className="w-full text-left p-4 rounded-lg border border-border hover:bg-accent transition-colors"
+                    disabled={Boolean(confirmingSourceId)}
                   >
                     <div className="flex items-center gap-3">
+                      <span className="flex h-4 w-4 items-center justify-center">
+                        {isSelected && (
+                          <Check className="h-4 w-4 text-emerald-500" />
+                        )}
+                      </span>
                       {getFileTypeIcon(source)}
                       <div className="flex-1">
                         <p className="text-sm font-medium">{nickname}</p>
                       </div>
+                      {isConfirming && (
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      )}
                     </div>
                   </button>
                 );
