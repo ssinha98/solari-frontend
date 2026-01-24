@@ -131,7 +131,7 @@ function DashboardHeader() {
             onClick={() => handleHeaderAction("help")}
           >
             <IoIosHelpCircleOutline className="h-5 w-5" />
-            Get help
+            Help
           </Button>
         </div>
       </header>
