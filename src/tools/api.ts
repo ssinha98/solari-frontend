@@ -662,7 +662,8 @@ export async function askPinecone(
   query: string,
   agentId: string,
   nickname?: string,
-  requestId?: string
+  requestId?: string,
+  modelProvider?: string
 ): Promise<AskPineconeResponse> {
   try {
     const apiUrl = `/api/handle-rag-message`;
@@ -674,6 +675,7 @@ export async function askPinecone(
       agent_id: agentId,
       nickname: nickname || "",
       requestId: requestId || "",
+      model_provider: modelProvider || "",
     };
 
     // Log the request being sent
@@ -722,7 +724,8 @@ export async function confirmSource(
   nickname: string,
   agentId: string,
   requestId?: string,
-  sourceSuggestion?: string
+  sourceSuggestion?: string,
+  modelProvider?: string
 ): Promise<AskPineconeResponse> {
   try {
     const apiUrl = `/api/source-confirmed`;
@@ -735,6 +738,7 @@ export async function confirmSource(
       agent_id: agentId,
       requestId: requestId || "",
       sourceSuggestion: sourceSuggestion || "",
+      model_provider: modelProvider || "",
     };
 
     // Log the request being sent
@@ -908,6 +912,48 @@ export async function tickSlackBatchSync(
     return data;
   } catch (error) {
     console.error("Error calling Slack batch sync tick API:", error);
+    throw error;
+  }
+}
+
+/**
+ * Updates an agent's model provider via the backend API
+ * @param userId - The user ID
+ * @param agentId - The agent ID
+ * @param modelProvider - The selected model provider
+ */
+export async function updateAgentModelProvider(
+  userId: string,
+  agentId: string,
+  modelProvider: string
+): Promise<{ success?: boolean; ok?: boolean; error?: string }> {
+  try {
+    const apiUrl = `/api/agent/update_model`;
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        agent_id: agentId,
+        model_provider: modelProvider,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Backend API error:", errorText);
+      throw new Error(`Backend API error: ${response.status} ${errorText}`);
+    }
+
+    return (await response.json()) as {
+      success?: boolean;
+      ok?: boolean;
+      error?: string;
+    };
+  } catch (error) {
+    console.error("Error calling update model provider API:", error);
     throw error;
   }
 }

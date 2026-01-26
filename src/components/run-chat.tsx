@@ -22,7 +22,12 @@ import { MdOutlineNotes } from "react-icons/md";
 import { Button } from "@/components/ui/button";
 import Image from "next/image";
 import { getAgentSources } from "@/tools/agent_tools";
-import { askPinecone, confirmSource, AskPineconeResponse } from "@/tools/api";
+import {
+  askPinecone,
+  confirmSource,
+  AskPineconeResponse,
+  updateAgentModelProvider,
+} from "@/tools/api";
 import { auth, db } from "@/tools/firebase";
 import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 import { CustomEditor } from "@/components/custom-editor";
@@ -56,6 +61,76 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+const DEFAULT_MODEL_PROVIDER = "gpt-4o-mini";
+
+const MODEL_OPTIONS: Array<{ value: string; label: string }> = [
+  {
+    value: "anthropic/claude-opus-4-5-20251101",
+    label: "Claude Opus 4.5",
+  },
+  {
+    value: "anthropic/claude-haiku-4-5-20251001",
+    label: "Claude Haiku 4.5",
+  },
+  {
+    value: "anthropic/claude-sonnet-4-5-20250929",
+    label: "Claude Sonnet 4.5",
+  },
+  {
+    value: "anthropic/claude-opus-4-1-20250805",
+    label: "Claude Opus 4.1",
+  },
+  {
+    value: "anthropic/claude-opus-4-20250514",
+    label: "Claude Opus 4",
+  },
+  {
+    value: "anthropic/claude-sonnet-4-20250514",
+    label: "Claude Sonnet 4",
+  },
+  {
+    value: "anthropic/claude-3-haiku-20240307",
+    label: "Claude Haiku 3",
+  },
+  {
+    value: "gemini/gemini-3-flash-preview",
+    label: "Gemini 3 Flash (Preview)",
+  },
+  {
+    value: "gemini/gemini-3-pro-preview",
+    label: "Gemini 3 Pro (Preview)",
+  },
+  {
+    value: "gemini/gemini-2.5-flash",
+    label: "Gemini 2.5 Flash",
+  },
+  {
+    value: "gemini/gemini-2.5-flash-lite",
+    label: "Gemini 2.5 Flash Lite",
+  },
+  {
+    value: "gemini/gemini-2.5-pro",
+    label: "Gemini 2.5 Pro",
+  },
+  { value: "gpt-4o", label: "GPT-4o" },
+  { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+  { value: "gpt-4.1", label: "GPT-4.1" },
+  { value: "gpt-4.1-mini", label: "GPT-4.1 Mini" },
+  { value: "o4-mini", label: "o4 Mini (Reasoning)" },
+  { value: "o3-mini", label: "o3 Mini (Reasoning)" },
+  { value: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
+];
+
+const getModelLabel = (value: string) =>
+  MODEL_OPTIONS.find((option) => option.value === value)?.label ?? value;
 
 // Helper function to get file type icon based on type or file extension
 function getFileTypeIcon(source: { type?: string; name?: string }) {
@@ -225,8 +300,7 @@ function renderTextWithMentions(text: string, mentionLabels: string[] = []) {
     parts.push(
       <span
         key={match.index}
-        className="font-bold"
-        style={{ color: "#303AAF" }}
+        className="font-bold text-white"
       >
         {match.text}
       </span>,
@@ -286,6 +360,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
   const [noteText, setNoteText] = useState("");
   const [agentName, setAgentName] = useState<string>("");
   const [teamId, setTeamId] = useState<string | null>(null);
+  const [modelProvider, setModelProvider] = useState(DEFAULT_MODEL_PROVIDER);
   const [sourceSelectionDialogOpen, setSourceSelectionDialogOpen] =
     useState(false);
   const [pendingConfirmationMessageId, setPendingConfirmationMessageId] =
@@ -296,6 +371,18 @@ export function RunChat({ agentId }: { agentId: string | null }) {
   );
   const countdownTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const editorRef = useRef<any>(null);
+
+  const handleModelProviderChange = async (value: string) => {
+    setModelProvider(value);
+    const user = auth.currentUser;
+    if (!user || !agentId) return;
+
+    try {
+      await updateAgentModelProvider(user.uid, agentId, value);
+    } catch (error) {
+      console.error("Failed to update model provider:", error);
+    }
+  };
 
   const createRatingDoc = async (
     ratingDocId: string,
@@ -587,6 +674,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
         agentId,
         nickname,
         requestId,
+        modelProvider,
       );
 
       // Check if response needs source confirmation
@@ -695,6 +783,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
         agentId,
         requestId,
         sourceSuggestion,
+        modelProvider,
       );
       const answerText =
         response.response_summarized ||
@@ -874,10 +963,14 @@ export function RunChat({ agentId }: { agentId: string | null }) {
         if (agentSnap.exists()) {
           const agentData = agentSnap.data();
           setAgentName(agentData.name || "Source chat agent");
+          setModelProvider(
+            agentData.model_provider || DEFAULT_MODEL_PROVIDER,
+          );
         }
       } catch (error) {
         console.error("Failed to fetch agent name:", error);
         setAgentName("Source chat agent");
+        setModelProvider(DEFAULT_MODEL_PROVIDER);
       }
     };
 
@@ -1311,6 +1404,29 @@ export function RunChat({ agentId }: { agentId: string | null }) {
           >
             <Send className="h-4 w-4" />
           </Button>
+        </div>
+
+        <div className="fixed bottom-6 right-6 z-50">
+          <Select
+            value={modelProvider}
+            onValueChange={handleModelProviderChange}
+          >
+            <SelectTrigger className="rounded-lg px-6 h-14 shadow-lg hover:shadow-xl transition-shadow gap-2 bg-card text-card-foreground border border-border hover:bg-accent hover:text-accent-foreground">
+              <span className="flex items-center gap-2">
+                <span>Model</span>
+                <SelectValue
+                  placeholder={getModelLabel(DEFAULT_MODEL_PROVIDER)}
+                />
+              </span>
+            </SelectTrigger>
+            <SelectContent align="end">
+              {MODEL_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
