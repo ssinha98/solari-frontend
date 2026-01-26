@@ -1,8 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Clock, Copy, Loader2, Mail, Plus, Trash2, X } from "lucide-react";
+import {
+  CheckCircle2,
+  Clock,
+  Copy,
+  Loader2,
+  Lock,
+  Mail,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react";
 import Link from "next/link";
 import { GoWorkflow } from "react-icons/go";
 import { MdChatBubble } from "react-icons/md";
@@ -20,6 +30,9 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
 import {
   InputOTP,
   InputOTPGroup,
@@ -79,7 +92,8 @@ export default function DashboardPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isLoadingAgents, setIsLoadingAgents] = useState(true);
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
-  const [teamDialogStep, setTeamDialogStep] = useState<1 | 2>(1);
+  const [teamDialogStep, setTeamDialogStep] = useState<1 | 2 | 3>(1);
+  const [isTeamAdmin, setIsTeamAdmin] = useState(false);
   const [memberDialogOpen, setMemberDialogOpen] = useState(false);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [onboardingTeamName, setOnboardingTeamName] = useState<string | null>(
@@ -96,12 +110,22 @@ export default function DashboardPage() {
   const [emailList, setEmailList] = useState<string[]>([]);
   const [isInvitingMembers, setIsInvitingMembers] = useState(false);
   const [inviteButtonLabel, setInviteButtonLabel] = useState("Invite");
+  const [hasInvitedMembers, setHasInvitedMembers] = useState(false);
+  const [emailInviteFromAdmin, setEmailInviteFromAdmin] = useState(false);
+  const [showPaymentAlternative, setShowPaymentAlternative] = useState(false);
+  const [isStartingTrial, setIsStartingTrial] = useState(false);
+  const [billingSuccess, setBillingSuccess] = useState(false);
+  const [isBookingSetup, setIsBookingSetup] = useState(false);
+  const [bookingSuccess, setBookingSuccess] = useState(false);
+  const [isFreeTrialing, setisFreeTrialing] = useState(false);
   const [deleteAgentDialogOpen, setDeleteAgentDialogOpen] = useState(false);
   const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
   const [isDeletingAgent, setIsDeletingAgent] = useState(false);
   const deleteAgentLabel =
     agentToDelete?.name ||
     (agentToDelete?.type ? `${agentToDelete.type} agent` : "this agent");
+  const billingStatusUnsubRef = useRef<null | (() => void)>(null);
+  const billingSuccessTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     const fetchAgents = async () => {
@@ -132,6 +156,19 @@ export default function DashboardPage() {
     };
 
     fetchAgents();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (billingStatusUnsubRef.current) {
+        billingStatusUnsubRef.current();
+        billingStatusUnsubRef.current = null;
+      }
+      if (billingSuccessTimeoutRef.current) {
+        window.clearTimeout(billingSuccessTimeoutRef.current);
+        billingSuccessTimeoutRef.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -205,6 +242,7 @@ export default function DashboardPage() {
               }
               const teamData = teamSnap.data();
               const createdBy = teamData?.createdBy as string | undefined;
+              const isAdminUser = createdBy !== user.uid;
               const hasTeamName = Boolean(teamData?.team_name);
               if (isMounted) {
                 setOnboardingTeamName(
@@ -213,6 +251,7 @@ export default function DashboardPage() {
                     : null,
                 );
                 setCreatorFirstName(null);
+                setIsTeamAdmin(isAdminUser);
               }
 
               if (createdBy) {
@@ -232,12 +271,14 @@ export default function DashboardPage() {
                 }
               }
 
-              if (createdBy === user.uid) {
+              if (isAdminUser) {
+                setIsTeamAdmin(true);
                 setTeamNameSaved(hasTeamName);
                 setTeamDialogStep(hasTeamName ? 2 : 1);
                 setMemberDialogOpen(false);
                 setTeamDialogOpen(true);
               } else {
+                setIsTeamAdmin(false);
                 setTeamDialogOpen(false);
                 setMemberDialogOpen(true);
               }
@@ -284,8 +325,10 @@ export default function DashboardPage() {
   }, []);
 
   const handleTeamDialogOpenChange = (open: boolean) => {
-    if (!open && !teamNameSaved) {
-      return;
+    if (!open) {
+      if (!teamNameSaved || teamDialogStep >= 2) {
+        return;
+      }
     }
     setTeamDialogOpen(open);
   };
@@ -298,6 +341,7 @@ export default function DashboardPage() {
     inviteCode.length === 6
       ? `${inviteCode.slice(0, 3)}-${inviteCode.slice(3)}`
       : "";
+  const paymentTeamLabel = onboardingTeamName || teamName.trim() || "Your team";
 
   const shouldLoadInviteCode =
     (teamDialogOpen && teamDialogStep === 2) || memberDialogOpen;
@@ -380,6 +424,22 @@ export default function DashboardPage() {
     void fetchTeamInviteCode();
   }, [shouldLoadInviteCode, teamId]);
 
+  useEffect(() => {
+    if (!teamDialogOpen || teamDialogStep !== 3) {
+      setShowPaymentAlternative(false);
+      return;
+    }
+
+    setShowPaymentAlternative(false);
+    const timeoutId = window.setTimeout(() => {
+      setShowPaymentAlternative(true);
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [teamDialogOpen, teamDialogStep]);
+
   const handleCopyInviteCode = async () => {
     try {
       if (!formattedInviteCode) {
@@ -399,6 +459,9 @@ export default function DashboardPage() {
   };
 
   const handleInviteByEmail = () => {
+    setEmailInviteFromAdmin(isTeamAdmin);
+    setHasInvitedMembers(false);
+    setInviteButtonLabel("Invite");
     setTeamDialogOpen(false);
     setMemberDialogOpen(false);
     setIsEmailDialogOpen(true);
@@ -430,6 +493,19 @@ export default function DashboardPage() {
   };
 
   const handleInviteMembers = async () => {
+    if (hasInvitedMembers) {
+      setIsEmailDialogOpen(false);
+      if (emailInviteFromAdmin) {
+        setTeamDialogOpen(true);
+        setTeamDialogStep(3);
+      } else {
+        await markOnboardingComplete();
+      }
+      setHasInvitedMembers(false);
+      setInviteButtonLabel("Invite");
+      return;
+    }
+
     const userId = auth.currentUser?.uid;
     if (!teamId || !userId || emailList.length === 0) {
       return;
@@ -439,14 +515,21 @@ export default function DashboardPage() {
       setIsInvitingMembers(true);
       const response = await inviteTeamMembers(teamId, emailList, userId);
       if (response.ok) {
-        setInviteButtonLabel("Done");
         toast.success("Invitations set!");
-        await markOnboardingComplete();
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        setIsEmailDialogOpen(false);
-        setEmailList([]);
-        setEmailInput("");
-        setInviteButtonLabel("Invite");
+        if (emailInviteFromAdmin) {
+          setHasInvitedMembers(true);
+          setInviteButtonLabel("Next");
+          setEmailList([]);
+          setEmailInput("");
+        } else {
+          setInviteButtonLabel("Done");
+          await markOnboardingComplete();
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          setIsEmailDialogOpen(false);
+          setEmailList([]);
+          setEmailInput("");
+          setInviteButtonLabel("Invite");
+        }
       } else {
         toast.error("Failed to send invitations.");
       }
@@ -458,9 +541,174 @@ export default function DashboardPage() {
     }
   };
 
-  const handleCreatorDone = async () => {
-    setTeamDialogOpen(false);
-    await markOnboardingComplete();
+  const handleCreatorDone = () => {
+    setTeamDialogOpen(true);
+    setTeamDialogStep(3);
+  };
+
+  const handleStartTrial = async () => {
+    const user = auth.currentUser;
+    if (!teamId || !user || isStartingTrial) {
+      return;
+    }
+
+    setBillingSuccess(false);
+    setIsStartingTrial(true);
+
+    try {
+      const response = await fetch("/api/stripe/create_checkout_session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.uid,
+          purchase: !isFreeTrialing,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Failed to start trial:", errorText);
+        toast.error("Failed to start trial. Please try again.");
+        setIsStartingTrial(false);
+        return;
+      }
+
+      let data: { url?: string } | null = null;
+      try {
+        data = await response.json();
+      } catch (error) {
+        data = null;
+      }
+
+      if (data?.url) {
+        window.open(data.url, "_blank", "noopener,noreferrer");
+      }
+
+      if (billingStatusUnsubRef.current) {
+        billingStatusUnsubRef.current();
+      }
+
+      const teamRef = doc(db, "teams", teamId);
+      billingStatusUnsubRef.current = onSnapshot(
+        teamRef,
+        (snap) => {
+          const status = snap.data()?.billing?.status;
+          if (
+            status === "active" ||
+            status === "trialing" ||
+            status === "booking_confirmed"
+          ) {
+            if (billingStatusUnsubRef.current) {
+              billingStatusUnsubRef.current();
+              billingStatusUnsubRef.current = null;
+            }
+            setBillingSuccess(true);
+            setIsStartingTrial(false);
+            if (billingSuccessTimeoutRef.current) {
+              window.clearTimeout(billingSuccessTimeoutRef.current);
+            }
+            billingSuccessTimeoutRef.current = window.setTimeout(() => {
+              setTeamDialogOpen(false);
+              setBillingSuccess(false);
+              void markOnboardingComplete();
+            }, 800);
+          }
+        },
+        (error) => {
+          console.error("Failed to watch billing status:", error);
+          toast.error("Failed to confirm billing status.");
+          if (billingStatusUnsubRef.current) {
+            billingStatusUnsubRef.current();
+            billingStatusUnsubRef.current = null;
+          }
+          setIsStartingTrial(false);
+        },
+      );
+    } catch (error) {
+      console.error("Failed to start trial:", error);
+      toast.error("Failed to start trial. Please try again.");
+      setIsStartingTrial(false);
+    }
+  };
+
+  const handleGetSetUpAnyway = async () => {
+    const user = auth.currentUser;
+    if (!teamId || !user || isBookingSetup) {
+      return;
+    }
+
+    setBookingSuccess(false);
+    setIsBookingSetup(true);
+
+    try {
+      const response = await fetch("/api/cal/create_appointment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.uid,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Failed to start booking:", errorText);
+        toast.error("Failed to start booking. Please try again.");
+        setIsBookingSetup(false);
+        return;
+      }
+
+      let data: { cal_url?: string } | null = null;
+      try {
+        data = await response.json();
+      } catch (error) {
+        data = null;
+      }
+
+      if (data?.cal_url) {
+        window.open(data.cal_url, "_blank", "noopener,noreferrer");
+      }
+
+      if (billingStatusUnsubRef.current) {
+        billingStatusUnsubRef.current();
+      }
+
+      const teamRef = doc(db, "teams", teamId);
+      billingStatusUnsubRef.current = onSnapshot(
+        teamRef,
+        (snap) => {
+          const status = snap.data()?.billing?.status;
+          if (status === "booking_confirmed") {
+            if (billingStatusUnsubRef.current) {
+              billingStatusUnsubRef.current();
+              billingStatusUnsubRef.current = null;
+            }
+            setBookingSuccess(true);
+            setIsBookingSetup(false);
+            if (billingSuccessTimeoutRef.current) {
+              window.clearTimeout(billingSuccessTimeoutRef.current);
+            }
+            billingSuccessTimeoutRef.current = window.setTimeout(() => {
+              setTeamDialogOpen(false);
+              setBookingSuccess(false);
+              void markOnboardingComplete();
+            }, 800);
+          }
+        },
+        (error) => {
+          console.error("Failed to watch booking status:", error);
+          toast.error("Failed to confirm booking status.");
+          if (billingStatusUnsubRef.current) {
+            billingStatusUnsubRef.current();
+            billingStatusUnsubRef.current = null;
+          }
+          setIsBookingSetup(false);
+        },
+      );
+    } catch (error) {
+      console.error("Failed to start booking:", error);
+      toast.error("Failed to start booking. Please try again.");
+      setIsBookingSetup(false);
+    }
   };
 
   const handleMemberDone = async () => {
@@ -585,7 +833,7 @@ export default function DashboardPage() {
                   To start of - what would you like to name your team?
                 </AlertDialogDescription>
               </>
-            ) : (
+            ) : teamDialogStep === 2 ? (
               <>
                 <AlertDialogTitle className="text-2xl font-bold">
                   Welcome to Solari{firstName ? ` ${firstName}` : ""}!
@@ -599,9 +847,23 @@ export default function DashboardPage() {
                   space. (Don’t worry you can always find this in settings).
                 </AlertDialogDescription>
               </>
+            ) : (
+              <>
+                <AlertDialogTitle className="text-2xl font-bold">
+                  🎉 {paymentTeamLabel} is ready to go
+                </AlertDialogTitle>
+                <AlertDialogDescription className="text-sm font-semibold text-foreground">
+                  You’re all set. Before you dive in, choose how you’d like to
+                  get started with Solari.
+                </AlertDialogDescription>
+              </>
             )}
           </AlertDialogHeader>
-          <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+          <div
+            className={`flex-1 overflow-y-auto space-y-4 pr-1 ${
+              teamDialogStep === 3 ? "pt-2" : ""
+            }`}
+          >
             {teamDialogStep === 1 && (
               <div className="space-y-3">
                 <Input
@@ -636,40 +898,111 @@ export default function DashboardPage() {
                 </Button>
               </div>
             )}
-          </div>
-          <AlertDialogFooter
-            className={`${teamDialogStep === 2 ? "sm:justify-between" : ""} pt-4 mt-auto`}
-          >
-            {teamDialogStep === 2 ? (
-              <>
+            {teamDialogStep === 3 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-center gap-3 text-sm text-muted-foreground">
+                  <Badge className="bg-emerald-500 text-emerald-950 hover:bg-emerald-500">
+                    20% discount
+                  </Badge>
+                  <Switch
+                    checked={isFreeTrialing}
+                    onCheckedChange={setisFreeTrialing}
+                  />
+                  <span>7 day free trial</span>
+                </div>
                 <Button
-                  variant="ghost"
-                  onClick={handleInviteByEmail}
-                  className="justify-start border border-white"
+                  type="button"
+                  className="w-full"
+                  onClick={handleStartTrial}
+                  disabled={isStartingTrial || billingSuccess}
                 >
-                  <Mail className="mr-2 h-4 w-4" />
-                  or - invite them by email
+                  {billingSuccess ? (
+                    <>
+                      <CheckCircle2 className="mr-2 h-4 w-4 text-emerald-500" />
+                      <span className="text-emerald-500">Success!</span>
+                    </>
+                  ) : isStartingTrial ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Waiting for confirmation...
+                    </>
+                  ) : isFreeTrialing ? (
+                    "Start your 7 day free trial"
+                  ) : (
+                    "Start subscription"
+                  )}
                 </Button>
-                <AlertDialogAction onClick={handleCreatorDone}>
-                  Done
-                </AlertDialogAction>
-              </>
-            ) : (
-              <Button
-                onClick={handleTeamNameNext}
-                disabled={!teamName.trim() || isSavingTeamName}
-              >
-                {isSavingTeamName ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Saving
-                  </>
-                ) : (
-                  "Next"
+                <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground text-center">
+                  <Lock className="h-4 w-4" />
+                  <span>Full access to Solari. No charge today.</span>
+                </div>
+                {showPaymentAlternative && (
+                  <div className="space-y-3">
+                    <Separator />
+                    <div className="text-sm text-muted-foreground text-center">
+                      Don’t have access to a card?{" "}
+                      <Button
+                        type="button"
+                        variant="link"
+                        className="px-1"
+                        onClick={handleGetSetUpAnyway}
+                        disabled={isBookingSetup || bookingSuccess}
+                      >
+                        {bookingSuccess ? (
+                          <span className="inline-flex items-center text-emerald-500">
+                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                            Success!
+                          </span>
+                        ) : isBookingSetup ? (
+                          <span className="inline-flex items-center">
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Opening...
+                          </span>
+                        ) : (
+                          "Get set up anyway"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
                 )}
-              </Button>
+              </div>
             )}
-          </AlertDialogFooter>
+          </div>
+          {teamDialogStep !== 3 && (
+            <AlertDialogFooter
+              className={`${teamDialogStep === 2 ? "sm:justify-between" : ""} pt-4 mt-auto`}
+            >
+              {teamDialogStep === 2 ? (
+                <>
+                  <Button
+                    variant="ghost"
+                    onClick={handleInviteByEmail}
+                    className="justify-start border border-white"
+                  >
+                    <Mail className="mr-2 h-4 w-4" />
+                    or - invite them by email
+                  </Button>
+                  <Button type="button" onClick={handleCreatorDone}>
+                    Next
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  onClick={handleTeamNameNext}
+                  disabled={!teamName.trim() || isSavingTeamName}
+                >
+                  {isSavingTeamName ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saving
+                    </>
+                  ) : (
+                    "Next"
+                  )}
+                </Button>
+              )}
+            </AlertDialogFooter>
+          )}
         </AlertDialogContent>
       </AlertDialog>
 
@@ -831,7 +1164,10 @@ export default function DashboardPage() {
             </Button>
             <Button
               onClick={handleInviteMembers}
-              disabled={emailList.length === 0 || isInvitingMembers}
+              disabled={
+                (!hasInvitedMembers && emailList.length === 0) ||
+                isInvitingMembers
+              }
             >
               {isInvitingMembers ? (
                 <>

@@ -6,8 +6,12 @@ import { DashboardLayout } from "@/components/dashboard-layout";
 export function ConditionalLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
-  // Don't wrap login page with DashboardLayout
-  if (pathname === "/login") {
+  // Don't wrap login or billing pages with DashboardLayout
+  if (
+    pathname === "/login" ||
+    pathname === "/billing/cancel" ||
+    pathname === "/billing/success"
+  ) {
     return <>{children}</>;
   }
 

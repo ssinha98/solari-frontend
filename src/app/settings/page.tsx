@@ -9,6 +9,7 @@ import { doc, getDoc, collection, getDocs } from "firebase/firestore";
 import { toast } from "sonner";
 import Image from "next/image";
 import { Copy, Loader2 } from "lucide-react";
+import { getBackendUrl } from "@/tools/backend-config";
 import {
   InputOTP,
   InputOTPGroup,
@@ -29,6 +30,12 @@ export default function SettingsPage() {
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [isLoadingInviteCode, setIsLoadingInviteCode] = useState(false);
   const [teamId, setTeamId] = useState<string | null>(null);
+  const [isBillingLoading, setIsBillingLoading] = useState(false);
+  const [profile, setProfile] = useState<{
+    photoURL?: string | null;
+    displayName?: string | null;
+    email?: string | null;
+  } | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -48,6 +55,17 @@ export default function SettingsPage() {
           const userData = userSnap.data();
           teamId = userData.teamId as string | undefined;
           setTeamId(teamId ?? null);
+          setProfile({
+            photoURL:
+              (userData.photoURL as string | undefined) ??
+              user.photoURL ??
+              null,
+            displayName:
+              (userData.displayName as string | undefined) ??
+              user.displayName ??
+              null,
+            email: (userData.email as string | undefined) ?? user.email ?? null,
+          });
           if (teamId) {
             setIsLoadingInviteCode(true);
             const teamRef = doc(db, "teams", teamId);
@@ -78,6 +96,11 @@ export default function SettingsPage() {
           setInviteCode(null);
           setIsAdmin(false);
           setTeamId(null);
+          setProfile({
+            photoURL: user.photoURL ?? null,
+            displayName: user.displayName ?? null,
+            email: user.email ?? null,
+          });
         }
 
         if (teamId) {
@@ -172,6 +195,50 @@ export default function SettingsPage() {
     } catch (error) {
       console.error("Failed to copy invite code:", error);
       toast.error("Failed to copy invite code.");
+    }
+  };
+
+  const handleManageBilling = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        toast.error("User must be authenticated");
+        return;
+      }
+
+      const payload = {
+        user_id: user.uid,
+      };
+
+      console.log("Manage billing payload:", payload);
+
+      setIsBillingLoading(true);
+      const response = await fetch(
+        "/api/stripe/manage_billing",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to create billing portal session");
+      }
+
+      const data = (await response.json()) as { url?: string };
+      if (!data.url) {
+        throw new Error("Billing portal URL missing");
+      }
+
+      window.open(data.url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      console.error("Failed to open billing portal:", error);
+      toast.error("Failed to open billing portal.");
+    } finally {
+      setIsBillingLoading(false);
     }
   };
 
@@ -334,18 +401,63 @@ export default function SettingsPage() {
           </div>
         </div>
         <div className="border-t pt-6">
-          <h3 className="text-lg font-semibold mb-2">Account</h3>
-          <p className="text-sm text-muted-foreground mb-4">
-            Manage your account settings and sign out.
+          <h3 className="text-lg font-semibold mb-2">Billing</h3>
+          <p className="text-sm text-muted-foreground">
+            Manage your billing settings and payment details.
           </p>
-          <Button
-            onClick={handleSignOut}
-            disabled={isSigningOut}
-            variant="outline"
-          >
-            {isSigningOut ? "Signing out..." : "Sign Out"}
-          </Button>
+          <div className="mt-4">
+            <Button
+              onClick={handleManageBilling}
+              variant="outline"
+              disabled={isBillingLoading}
+            >
+              {isBillingLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="ml-2">Loading...</span>
+                </>
+              ) : (
+                "Manage billing"
+              )}
+            </Button>
+          </div>
         </div>
+      </div>
+      <div className="rounded-lg border bg-card p-6">
+        <h3 className="text-lg font-semibold mb-2">Account</h3>
+        <div className="flex items-center gap-4 mb-4">
+          <div className="h-12 w-12 rounded-full overflow-hidden bg-muted">
+            {profile?.photoURL ? (
+              <img
+                src={profile.photoURL}
+                alt={profile.displayName ?? "User avatar"}
+                className="h-12 w-12 object-cover"
+                width={48}
+                height={48}
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="h-12 w-12 flex items-center justify-center text-sm text-muted-foreground">
+                {profile?.displayName?.[0] ?? "U"}
+              </div>
+            )}
+          </div>
+          <div>
+            <div className="text-base font-medium">
+              {profile?.displayName ?? "Unknown user"}
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {profile?.email ?? "No email"}
+            </div>
+          </div>
+        </div>
+        <Button
+          onClick={handleSignOut}
+          disabled={isSigningOut}
+          variant="outline"
+        >
+          {isSigningOut ? "Signing out..." : "Sign Out"}
+        </Button>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
 import { GlobalCommandMenu } from "@/components/global-command-menu";
@@ -10,7 +10,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
-import { Book, Pencil, Loader2 } from "lucide-react";
+import { Book, Pencil, Loader2, Calendar } from "lucide-react";
 import { updateAgentName } from "@/tools/agent_tools";
 import {
   Dialog,
@@ -24,6 +24,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { IoIosHelpCircleOutline } from "react-icons/io";
+import { onAuthStateChanged } from "firebase/auth";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
+import { auth, db } from "@/tools/firebase";
 
 const pageTitles: Record<string, string> = {
   "/": "Agents",
@@ -46,6 +49,13 @@ function DashboardHeader() {
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [newAgentName, setNewAgentName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [billingStatus, setBillingStatus] = useState<string | null>(null);
+  const [billingCalStartTime, setBillingCalStartTime] = useState<string | null>(
+    null,
+  );
+  const [billingRescheduleId, setBillingRescheduleId] = useState<string | null>(
+    null,
+  );
 
   // Check if we're on an agent page and have an agent name
   const isAgentPage = [
@@ -57,6 +67,128 @@ function DashboardHeader() {
   const isEditMode = isAgentPage && searchParams.get("edit") === "true";
   const pageTitle =
     isAgentPage && agentName ? agentName : pageTitles[pathname] || "Page";
+
+  useEffect(() => {
+    let isMounted = true;
+    let unsubscribeTeam: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (nextUser) => {
+      if (!isMounted) {
+        return;
+      }
+
+      if (!nextUser) {
+        setBillingStatus(null);
+        setBillingCalStartTime(null);
+        setBillingRescheduleId(null);
+        return;
+      }
+
+      try {
+        const userSnap = await getDoc(doc(db, "users", nextUser.uid));
+        const teamId = userSnap.exists()
+          ? (userSnap.data().teamId as string | undefined)
+          : undefined;
+
+        if (!teamId) {
+          setBillingStatus(null);
+          setBillingCalStartTime(null);
+          setBillingRescheduleId(null);
+          return;
+        }
+
+        const teamRef = doc(db, "teams", teamId);
+        unsubscribeTeam = onSnapshot(
+          teamRef,
+          (teamSnap) => {
+            if (!isMounted) {
+              return;
+            }
+            if (!teamSnap.exists()) {
+              setBillingStatus(null);
+              setBillingCalStartTime(null);
+              setBillingRescheduleId(null);
+              return;
+            }
+
+            const billing = teamSnap.data()?.billing as
+              | {
+                  status?: string;
+                  cal_start_time?: string;
+                  reschedule_id?: string;
+                }
+              | undefined;
+
+            setBillingStatus(billing?.status ?? null);
+            setBillingCalStartTime(billing?.cal_start_time ?? null);
+            setBillingRescheduleId(billing?.reschedule_id ?? null);
+          },
+          () => {
+            if (!isMounted) {
+              return;
+            }
+            setBillingStatus(null);
+            setBillingCalStartTime(null);
+            setBillingRescheduleId(null);
+          },
+        );
+      } catch (error) {
+        console.error("Failed to load billing info:", error);
+        setBillingStatus(null);
+        setBillingCalStartTime(null);
+        setBillingRescheduleId(null);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      if (unsubscribeTeam) {
+        unsubscribeTeam();
+      }
+      unsubscribeAuth();
+    };
+  }, []);
+
+  const bookingDate = useMemo(() => {
+    if (!billingCalStartTime) {
+      return null;
+    }
+    const date = new Date(billingCalStartTime);
+    if (Number.isNaN(date.getTime())) {
+      return null;
+    }
+    return date;
+  }, [billingCalStartTime]);
+
+  const bookingDisplayDate = useMemo(() => {
+    if (!bookingDate) {
+      return null;
+    }
+    return new Intl.DateTimeFormat(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    }).format(bookingDate);
+  }, [bookingDate]);
+
+  const isFutureBooking = useMemo(() => {
+    if (!bookingDate) {
+      return false;
+    }
+    const now = Date.now();
+    const endTime = bookingDate.getTime() + 30 * 60 * 1000;
+    return now < endTime;
+  }, [bookingDate]);
+
+  const rescheduleUrl = useMemo(() => {
+    if (!billingRescheduleId) {
+      return null;
+    }
+    const base = "https://cal.com/sahil-sinha-hugr4z/solari-onboarding";
+    return `${base}?rescheduleUid=${encodeURIComponent(
+      billingRescheduleId,
+    )}&overlayCalendar=true`;
+  }, [billingRescheduleId]);
 
   const handleEditClick = () => {
     if (isExistingAgent) {
@@ -117,6 +249,25 @@ function DashboardHeader() {
           <h1 className="text-xl font-semibold">{pageTitle}</h1>
         )}
         <div className="ml-auto flex items-center gap-2">
+          {billingStatus === "booking_confirmed" &&
+            isFutureBooking &&
+            bookingDisplayDate &&
+            rescheduleUrl && (
+              <Button
+                size="lg"
+                className="gap-2 border border-dotted border-white bg-transparent text-white hover:bg-white/10"
+                asChild
+              >
+                <a
+                  href={rescheduleUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Calendar className="h-4 w-4" />
+                  {bookingDisplayDate}
+                </a>
+              </Button>
+            )}
           <Button
             size="lg"
             className="gap-2 bg-[#14281D] text-white hover:bg-[#1b3828]"

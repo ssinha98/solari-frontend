@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthWrapper } from "@/components/auth-wrapper";
+import { BillingWrapper } from "@/components/billing-wrapper";
 import { ConditionalLayout } from "@/components/conditional-layout";
 import { Toaster } from "@/components/ui/toaster";
 
@@ -31,7 +32,9 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <AuthWrapper>
-          <ConditionalLayout>{children}</ConditionalLayout>
+          <BillingWrapper>
+            <ConditionalLayout>{children}</ConditionalLayout>
+          </BillingWrapper>
         </AuthWrapper>
         <Toaster />
       </body>
