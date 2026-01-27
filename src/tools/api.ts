@@ -561,6 +561,7 @@ export async function updateTeamMemberRole(
  */
 export async function analyzeTable(
   userId: string,
+  teamId: string,
   agentId: string,
   documentId: string
 ): Promise<{
@@ -584,6 +585,7 @@ export async function analyzeTable(
       },
       body: JSON.stringify({
         user_id: userId,
+        team_id: teamId,
         agent_id: agentId,
         document_id: documentId,
       }),

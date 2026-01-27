@@ -175,8 +175,55 @@ export default function SettingsPage() {
     )}`;
   };
 
-  const handleSlackCallback = () => {
-    router.push("/settings/slack_callback");
+  const handleSlackCallback = async () => {
+    if (hasSlackInstallation) {
+      router.push("/settings/slack_callback");
+      return;
+    }
+
+    const user = auth.currentUser;
+    if (!user) {
+      toast.error("User must be authenticated");
+      return;
+    }
+
+    try {
+      setIsConnectingSlack(true);
+      const response = await fetch("/api/slack/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userid: user.uid }),
+        redirect: "follow",
+      });
+
+      if (response.redirected) {
+        window.open(response.url, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to start Slack auth.");
+      }
+
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const data = await response.json();
+        const authorizeUrl =
+          data?.authorize_url || data?.url || data?.redirect_url;
+        if (authorizeUrl) {
+          window.open(authorizeUrl, "_blank", "noopener,noreferrer");
+          return;
+        }
+      }
+
+      toast.error("Failed to start Slack auth.");
+    } catch (error) {
+      console.error("Failed to start Slack auth:", error);
+      toast.error("Failed to start Slack auth.");
+    } finally {
+      setIsConnectingSlack(false);
+    }
   };
 
   const formattedInviteCode =

@@ -86,6 +86,21 @@ function getAgentTypeIcon(type: string) {
   }
 }
 
+function getAgentTypeLabel(type: string) {
+  switch (type.toLowerCase()) {
+    case "source chat":
+      return "Chat (RAG)";
+    case "workflow":
+      return "Workflow";
+    case "copilot":
+      return "Copilot";
+    case "copilots":
+      return "Copilots";
+    default:
+      return type;
+  }
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -173,9 +188,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let isMounted = true;
+    let userUnsubscribe: (() => void) | null = null;
     let teamUserUnsubscribe: (() => void) | null = null;
-    let teamUserTimeout: number | null = null;
     let handledOnboarding = false;
+    let currentTeamId: string | null = null;
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user || !isMounted) {
@@ -187,126 +203,122 @@ export default function DashboardPage() {
           teamUserUnsubscribe();
           teamUserUnsubscribe = null;
         }
-        if (teamUserTimeout) {
-          window.clearTimeout(teamUserTimeout);
-          teamUserTimeout = null;
-        }
 
         const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-        if (!userSnap.exists()) {
-          return;
+        if (userUnsubscribe) {
+          userUnsubscribe();
+          userUnsubscribe = null;
         }
 
-        const teamId = userSnap.data().teamId as string | undefined;
-        if (!teamId) {
-          return;
-        }
+        userUnsubscribe = onSnapshot(userRef, (userSnap) => {
+          if (!userSnap.exists()) {
+            return;
+          }
 
-        setTeamId(teamId);
+          const teamId = userSnap.data().teamId as string | undefined;
+          if (!teamId) {
+            return;
+          }
 
-        const teamUserRef = doc(db, "teams", teamId, "users", user.uid);
+          if (currentTeamId === teamId) {
+            return;
+          }
 
-        teamUserUnsubscribe = onSnapshot(
-          teamUserRef,
-          async (teamUserSnap) => {
-            if (!isMounted || !teamUserSnap.exists() || handledOnboarding) {
-              return;
-            }
+          currentTeamId = teamId;
+          setTeamId(teamId);
 
-            const teamUserData = teamUserSnap.data();
-            if (teamUserData?.show_onboarding === undefined) {
-              return;
-            }
-
-            const showOnboarding = Boolean(teamUserData?.show_onboarding);
-            if (!showOnboarding) {
-              if (teamUserUnsubscribe) {
-                teamUserUnsubscribe();
-                teamUserUnsubscribe = null;
-              }
-              if (teamUserTimeout) {
-                window.clearTimeout(teamUserTimeout);
-                teamUserTimeout = null;
-              }
-              return;
-            }
-
-            handledOnboarding = true;
-            try {
-              const teamRef = doc(db, "teams", teamId);
-              const teamSnap = await getDoc(teamRef);
-              if (!teamSnap.exists()) {
-                handledOnboarding = false;
-                return;
-              }
-              const teamData = teamSnap.data();
-              const createdBy = teamData?.createdBy as string | undefined;
-              const isAdminUser = createdBy !== user.uid;
-              const hasTeamName = Boolean(teamData?.team_name);
-              if (isMounted) {
-                setOnboardingTeamName(
-                  typeof teamData?.team_name === "string"
-                    ? teamData.team_name
-                    : null,
-                );
-                setCreatorFirstName(null);
-                setIsTeamAdmin(isAdminUser);
-              }
-
-              if (createdBy) {
-                try {
-                  const creatorResponse = await getCreatorFirstName(
-                    teamId,
-                    user.uid,
-                  );
-                  const creatorFirst = creatorResponse.ok
-                    ? (creatorResponse.creator_first_name ?? null)
-                    : null;
-                  if (isMounted) {
-                    setCreatorFirstName(creatorFirst);
-                  }
-                } catch (error) {
-                  console.error("Failed to fetch creator first name:", error);
-                }
-              }
-
-              if (isAdminUser) {
-                setIsTeamAdmin(true);
-                setTeamNameSaved(hasTeamName);
-                setTeamDialogStep(hasTeamName ? 2 : 1);
-                setMemberDialogOpen(false);
-                setTeamDialogOpen(true);
-              } else {
-                setIsTeamAdmin(false);
-                setTeamDialogOpen(false);
-                setMemberDialogOpen(true);
-              }
-            } catch (error) {
-              console.error("Failed to load team metadata:", error);
-              handledOnboarding = false;
-            }
-
-            if (teamUserUnsubscribe) {
-              teamUserUnsubscribe();
-              teamUserUnsubscribe = null;
-            }
-            if (teamUserTimeout) {
-              window.clearTimeout(teamUserTimeout);
-              teamUserTimeout = null;
-            }
-          },
-          (error) => {
-            console.error("Failed to watch onboarding status:", error);
-          },
-        );
-
-        teamUserTimeout = window.setTimeout(() => {
           if (teamUserUnsubscribe) {
             teamUserUnsubscribe();
             teamUserUnsubscribe = null;
           }
-        }, 10000);
+
+          const teamUserRef = doc(db, "teams", teamId, "users", user.uid);
+          teamUserUnsubscribe = onSnapshot(
+            teamUserRef,
+            async (teamUserSnap) => {
+              if (!isMounted || !teamUserSnap.exists() || handledOnboarding) {
+                return;
+              }
+
+              const teamUserData = teamUserSnap.data();
+              if (teamUserData?.show_onboarding === undefined) {
+                return;
+              }
+
+              const showOnboarding = Boolean(teamUserData?.show_onboarding);
+              if (!showOnboarding) {
+                if (teamUserUnsubscribe) {
+                  teamUserUnsubscribe();
+                  teamUserUnsubscribe = null;
+                }
+                return;
+              }
+
+              handledOnboarding = true;
+              try {
+                const teamRef = doc(db, "teams", teamId);
+                const teamSnap = await getDoc(teamRef);
+                if (!teamSnap.exists()) {
+                  handledOnboarding = false;
+                  return;
+                }
+                const teamData = teamSnap.data();
+                const createdBy = teamData?.createdBy as string | undefined;
+                const isAdminUser = createdBy === user.uid;
+                const hasTeamName = Boolean(teamData?.team_name);
+                if (isMounted) {
+                  setOnboardingTeamName(
+                    typeof teamData?.team_name === "string"
+                      ? teamData.team_name
+                      : null,
+                  );
+                  setCreatorFirstName(null);
+                  setIsTeamAdmin(isAdminUser);
+                }
+
+                if (createdBy) {
+                  try {
+                    const creatorResponse = await getCreatorFirstName(
+                      teamId,
+                      user.uid,
+                    );
+                    const creatorFirst = creatorResponse.ok
+                      ? (creatorResponse.creator_first_name ?? null)
+                      : null;
+                    if (isMounted) {
+                      setCreatorFirstName(creatorFirst);
+                    }
+                  } catch (error) {
+                    console.error("Failed to fetch creator first name:", error);
+                  }
+                }
+
+                if (isAdminUser) {
+                  setIsTeamAdmin(true);
+                  setTeamNameSaved(hasTeamName);
+                  setTeamDialogStep(hasTeamName ? 2 : 1);
+                  setMemberDialogOpen(false);
+                  setTeamDialogOpen(true);
+                } else {
+                  setIsTeamAdmin(false);
+                  setTeamDialogOpen(false);
+                  setMemberDialogOpen(true);
+                }
+              } catch (error) {
+                console.error("Failed to load team metadata:", error);
+                handledOnboarding = false;
+              }
+
+              if (teamUserUnsubscribe) {
+                teamUserUnsubscribe();
+                teamUserUnsubscribe = null;
+              }
+            },
+            (error) => {
+              console.error("Failed to watch onboarding status:", error);
+            },
+          );
+        });
       } catch (error) {
         console.error("Failed to check team setup:", error);
       }
@@ -314,11 +326,11 @@ export default function DashboardPage() {
 
     return () => {
       isMounted = false;
+      if (userUnsubscribe) {
+        userUnsubscribe();
+      }
       if (teamUserUnsubscribe) {
         teamUserUnsubscribe();
-      }
-      if (teamUserTimeout) {
-        window.clearTimeout(teamUserTimeout);
       }
       unsubscribe();
     };
@@ -722,6 +734,7 @@ export default function DashboardPage() {
     // Navigate to the corresponding agent creation page with ?new=true query param
     switch (type.toLowerCase()) {
       case "workflow":
+      case "copilots":
         toast.info("Workflow coming soon!");
         break;
       case "source chat":
@@ -843,8 +856,8 @@ export default function DashboardPage() {
                   space?
                 </AlertDialogDescription>
                 <AlertDialogDescription>
-                  here’s a 6 digit code you can send them to let them join this
-                  space. (Don’t worry you can always find this in settings).
+                  Here’s a 6 digit code you can send them to let them join this
+                  space. (Don’t worry you can always find this in Members and Permissions).
                 </AlertDialogDescription>
               </>
             ) : (
@@ -1061,7 +1074,7 @@ export default function DashboardPage() {
             <AlertDialogDescription>
               <span className="italic">
                 (Don't worry about losing this code, you can always find it in
-                settings)
+                  Members and Permissions)
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1298,7 +1311,7 @@ export default function DashboardPage() {
                         </div>
                       </td>
                       <td className="py-3 px-4 text-sm">
-                        {agent.name || `${agent.type} agent`}
+                        {agent.name || `${getAgentTypeLabel(agent.type)} agent`}
                       </td>
                       <td className="py-3 px-4">
                         <button
@@ -1306,7 +1319,7 @@ export default function DashboardPage() {
                           onClick={(event) => handleInfoClick(event, agent)}
                           className="text-muted-foreground hover:text-foreground"
                           aria-label={`View analytics for ${
-                            agent.name || agent.type
+                            agent.name || getAgentTypeLabel(agent.type)
                           }`}
                         >
                           <IoAnalyticsOutline className="h-5 w-5" />
@@ -1319,7 +1332,9 @@ export default function DashboardPage() {
                               type="button"
                               onClick={(event) => event.stopPropagation()}
                               className="text-muted-foreground hover:text-foreground"
-                              aria-label={`Open ${agent.name || agent.type} options`}
+                              aria-label={`Open ${
+                                agent.name || getAgentTypeLabel(agent.type)
+                              } options`}
                             >
                               <VscSettings className="h-5 w-5" />
                             </button>
@@ -1393,15 +1408,15 @@ export default function DashboardPage() {
               className="flex items-center gap-2 cursor-pointer"
             >
               <MdChatBubble className="h-4 w-4" />
-              <span>Source Chat</span>
+              <span>Chat (RAG) agent</span>
             </DropdownMenuItem>
-            {/* <DropdownMenuItem
-              onClick={() => handleAgentTypeSelect("copilot")}
+            <DropdownMenuItem
+              onClick={() => handleAgentTypeSelect("copilots")}
               className="flex items-center gap-2 cursor-pointer"
             >
               <FaHandsHelping className="h-4 w-4" />
-              <span>Copilot</span>
-            </DropdownMenuItem> */}
+              <span>Copilots</span>
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

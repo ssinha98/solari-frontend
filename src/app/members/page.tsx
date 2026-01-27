@@ -696,8 +696,8 @@ export default function MembersPage() {
             </AlertDialogDescription>
             <AlertDialogDescription>
               <span className="italic">
-                (Don't worry about losing this code, you can always find it in
-                settings)
+                {/* (Don't worry about losing this code, you can always find it in
+                Members and Permissions) */}
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>

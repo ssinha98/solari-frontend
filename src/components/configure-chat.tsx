@@ -1510,7 +1510,11 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
       const csvFile = await convertToCSV(selectedTableFile);
 
       // Upload file to Firebase Storage (now as CSV)
-      const filePath = await uploadSourceFile(csvFile, tableNickname.trim());
+      const filePath = await uploadSourceFile(
+        csvFile,
+        tableNickname.trim(),
+        "table",
+      );
 
       // Add source with file path - capture the document ID
       // Use original filename for display, but filePath points to CSV
@@ -1534,6 +1538,7 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
       try {
         const analysisResponse = await analyzeTable(
           user.uid,
+          teamId,
           agentId,
           agentSourceId,
         );
@@ -1768,7 +1773,12 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
       }
 
       // Call analyzeTable to get column metadata
-      const analysisResponse = await analyzeTable(user.uid, agentId, sourceId);
+      const analysisResponse = await analyzeTable(
+        user.uid,
+        teamId,
+        agentId,
+        sourceId,
+      );
 
       // Prepare column types for confirmation
       const mappedColumns: Record<

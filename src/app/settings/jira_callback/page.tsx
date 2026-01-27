@@ -78,7 +78,7 @@ export default function JiraCallbackPage() {
 
         // Fetch workspaces
         const response = await fetch(
-          `/api/jira/workspaces?user_id=${user.uid}`
+          `/api/jira/workspaces?user_id=${user.uid}`,
         );
 
         if (!response.ok) {
@@ -193,9 +193,9 @@ export default function JiraCallbackPage() {
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Settings
         </Button>
-        <h2 className="text-2xl font-semibold mb-2">Select Jira Workspace</h2>
+        <h2 className="text-2xl font-semibold mb-2">Select Workspace</h2>
         <p className="text-muted-foreground">
-          Choose which Jira workspace to connect to your account.
+          Choose which workspace to connect to your account.
         </p>
       </div>
 
@@ -270,11 +270,12 @@ export default function JiraCallbackPage() {
       <AlertDialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove Jira Connection</AlertDialogTitle>
+            <AlertDialogTitle>Remove Atlassian Connection</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to remove your Jira connection? This will
-              delete all Jira-related data from your account and you will need
-              to log in again to reconnect. This action cannot be undone.
+              Are you sure you want to remove your Atlassian connection? This
+              will delete all Atlassian-related data from your account and you
+              will need to log in again to reconnect. This action cannot be
+              undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

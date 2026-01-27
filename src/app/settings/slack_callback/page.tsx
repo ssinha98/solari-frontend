@@ -123,8 +123,8 @@ export default function SlackCallbackPage() {
 
       setIsRemoving(true);
 
-      // Delete the document from slack_installations subcollection
-      const installationRef = doc(
+      // Delete from team-scoped slack_installations
+      const teamInstallationRef = doc(
         db,
         "teams",
         teamId,
@@ -133,7 +133,20 @@ export default function SlackCallbackPage() {
         "slack_installations",
         installation.id
       );
-      await deleteDoc(installationRef);
+
+      // Delete from user-scoped slack_installations (legacy location)
+      const userInstallationRef = doc(
+        db,
+        "users",
+        user.uid,
+        "slack_installations",
+        installation.id
+      );
+
+      await Promise.all([
+        deleteDoc(teamInstallationRef),
+        deleteDoc(userInstallationRef),
+      ]);
 
       setInstallation(null);
       setRemoveDialogOpen(false);

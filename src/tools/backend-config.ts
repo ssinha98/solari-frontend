@@ -15,6 +15,6 @@ export const getBackendUrl = (): string => {
   }
 
   return ENVIRONMENT === "prod"
-    ? "https://api.usesolari.ai" // TODO: Update this with your actual Render.com URL
+    ? "https://api.usesolari.ai"
     : "http://localhost:5000";
 };

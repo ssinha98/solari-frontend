@@ -68,7 +68,7 @@ function ChatAgentContent() {
           setAgentId(id);
           setShowNameDialog(true);
         } catch (error) {
-          console.error("Failed to create source chat agent:", error);
+          console.error("Failed to create Chat (RAG) agent:", error);
         } finally {
           setIsCreating(false);
         }
@@ -158,7 +158,7 @@ function ChatAgentContent() {
   if (isCreating) {
     return (
       <div className="space-y-4">
-        <p className="text-muted-foreground">Creating source chat agent...</p>
+        <p className="text-muted-foreground">Creating Chat (RAG) agent...</p>
       </div>
     );
   }
@@ -197,7 +197,7 @@ function ChatAgentContent() {
           <DialogHeader>
             <DialogTitle>Name Your Agent</DialogTitle>
             <DialogDescription>
-              Give your source chat agent a name to help you identify it later.
+              Give your Chat (RAG) agent a name to help you identify it later.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
