@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { signInWithPopup } from "firebase/auth";
-import { auth, googleProvider } from "@/tools/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { auth, db, googleProvider } from "@/tools/firebase";
+import { usePostHog } from "posthog-js/react";
 import {
   createOrUpdateUserDocument,
   getUserDocument,
@@ -31,6 +33,7 @@ export default function LoginPage() {
     "idle" | "valid" | "invalid"
   >("idle");
   const searchParams = useSearchParams();
+  const posthog = usePostHog();
 
   useEffect(() => {
     const inviteParam = searchParams.get("invite");
@@ -76,6 +79,9 @@ export default function LoginPage() {
   const handleGoogleSignIn = async () => {
     try {
       setIsLoading(true);
+      posthog?.capture("account_create_attempt", {
+        team_choice: selectedOption ?? "none",
+      });
       const result = await signInWithPopup(auth, googleProvider);
       const userSnap = await getUserDocument(result.user.uid);
       const isExistingUser = userSnap.exists();
@@ -106,6 +112,42 @@ export default function LoginPage() {
         isExistingUser ? undefined : (selectedOption ?? undefined),
         inviteCode.trim(),
       );
+      if (!isExistingUser) {
+        let newTeamId = createdTeamId ?? undefined;
+        if (!newTeamId) {
+          const refreshedSnap = await getUserDocument(result.user.uid);
+          newTeamId = refreshedSnap.exists()
+            ? (refreshedSnap.data().teamId as string | undefined)
+            : undefined;
+        }
+        const eventProperties: Record<string, string> = {
+          user_id: result.user.uid,
+        };
+        if (newTeamId) {
+          eventProperties.team_id = newTeamId;
+        }
+        posthog?.capture("account_create_successful", eventProperties);
+      } else {
+        const userTeamId = userSnap.exists()
+          ? (userSnap.data().teamId as string | undefined)
+          : undefined;
+        const eventProperties: Record<string, string> = {
+          user_id: result.user.uid,
+        };
+        if (userTeamId) {
+          eventProperties.team_id = userTeamId;
+          try {
+            const teamSnap = await getDoc(doc(db, "teams", userTeamId));
+            const teamName = teamSnap.data()?.team_name;
+            if (typeof teamName === "string" && teamName.trim()) {
+              eventProperties.team_name = teamName.trim();
+            }
+          } catch (error) {
+            console.warn("Failed to load team name for login:", error);
+          }
+        }
+        posthog?.capture("logged_in", eventProperties);
+      }
       if (createdTeamId) {
         sessionStorage.setItem("createdTeamId", createdTeamId);
       }

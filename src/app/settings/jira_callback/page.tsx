@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { auth, db } from "@/tools/firebase";
 import {
   doc,
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { Check, ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { usePostHog } from "posthog-js/react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,12 +39,15 @@ interface WorkspacesResponse {
 
 export default function JiraCallbackPage() {
   const router = useRouter();
+  const posthog = usePostHog();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
   const [selectedCloudId, setSelectedCloudId] = useState<string | null>(null);
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
+  const [teamId, setTeamId] = useState<string | null>(null);
+  const [teamName, setTeamName] = useState<string>("");
 
   useEffect(() => {
     const fetchData = async () => {
@@ -64,16 +68,23 @@ export default function JiraCallbackPage() {
           : undefined;
 
         if (teamId) {
+          setTeamId(teamId);
           const teamRef = doc(db, "teams", teamId);
           const teamSnap = await getDoc(teamRef);
           if (teamSnap.exists()) {
             const teamData = teamSnap.data();
             setSelectedCloudId(teamData.jira_cloud_id || null);
+            setTeamName(
+              typeof teamData.team_name === "string" ? teamData.team_name : "",
+            );
           } else {
             setSelectedCloudId(null);
+            setTeamName("");
           }
         } else {
+          setTeamId(null);
           setSelectedCloudId(null);
+          setTeamName("");
         }
 
         // Fetch workspaces
@@ -103,6 +114,21 @@ export default function JiraCallbackPage() {
     fetchData();
   }, []);
 
+  const getPosthogAuthProps = () => {
+    const eventProps: Record<string, string> = {};
+    const userId = auth.currentUser?.uid;
+    if (userId) {
+      eventProps.user_id = userId;
+    }
+    if (teamId) {
+      eventProps.team_id = teamId;
+    }
+    if (teamName) {
+      eventProps.team_name = teamName;
+    }
+    return eventProps;
+  };
+
   const handleWorkspaceSelect = async (workspace: Workspace) => {
     try {
       const user = auth.currentUser;
@@ -131,6 +157,7 @@ export default function JiraCallbackPage() {
       });
 
       setSelectedCloudId(workspace.cloudId);
+      posthog?.capture("settings: atlassian_completed", getPosthogAuthProps());
       toast.success(`Jira workspace "${workspace.name}" selected successfully`);
     } catch (error) {
       console.error("Error updating user workspace:", error);

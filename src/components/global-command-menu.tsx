@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
+import { usePostHog } from "posthog-js/react";
 
 import {
   CommandDialog,
@@ -19,9 +20,13 @@ import { getTeamAgents, type Agent } from "@/tools/agent_tools";
 import { auth, db } from "@/tools/firebase";
 
 const PAGE_ITEMS = [
-  { label: "Agents", href: "/" },
-  { label: "Members", href: "/members" },
-  { label: "Settings", href: "/settings" },
+  { label: "Agents", href: "/", eventName: "nav: agents" },
+  {
+    label: "Members",
+    href: "/members",
+    eventName: "nav: members and permissions",
+  },
+  { label: "Settings", href: "/settings", eventName: "nav: settings" },
 ];
 
 const isTextInputElement = (element: Element | null) => {
@@ -43,10 +48,14 @@ const isTextInputElement = (element: Element | null) => {
 
 export function GlobalCommandMenu() {
   const router = useRouter();
+  const pathname = usePathname();
   const { toggleSidebar } = useSidebar();
+  const posthog = usePostHog();
   const [open, setOpen] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isLoadingAgents, setIsLoadingAgents] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [teamId, setTeamId] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -59,9 +68,12 @@ export function GlobalCommandMenu() {
       if (!user) {
         setAgents([]);
         setIsLoadingAgents(false);
+        setUserId(null);
+        setTeamId(null);
         return;
       }
 
+      setUserId(user.uid);
       setIsLoadingAgents(true);
       try {
         const userSnap = await getDoc(doc(db, "users", user.uid));
@@ -71,8 +83,10 @@ export function GlobalCommandMenu() {
 
         if (!teamId) {
           setAgents([]);
+          setTeamId(null);
           return;
         }
+        setTeamId(teamId);
 
         const teamAgents = await getTeamAgents(teamId, user.uid, {
           includeAllForAdmins: true,
@@ -94,6 +108,17 @@ export function GlobalCommandMenu() {
       unsubscribe();
     };
   }, []);
+
+  const getNavProps = () => {
+    const eventProps: Record<string, string> = {};
+    if (userId) {
+      eventProps.user_id = userId;
+    }
+    if (teamId) {
+      eventProps.team_id = teamId;
+    }
+    return eventProps;
+  };
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -120,6 +145,7 @@ export function GlobalCommandMenu() {
   const agentItems = useMemo(
     () =>
       agents.map((agent) => ({
+        agent,
         id: agent.id,
         label: agent.name || `${agent.type} agent`,
         value: `${agent.name ?? ""} ${agent.type}`.trim(),
@@ -127,13 +153,22 @@ export function GlobalCommandMenu() {
     [agents]
   );
 
-  const handleNavigate = (href: string) => {
+  const handleNavigate = (href: string, eventName: string) => {
+    if (pathname !== href) {
+      posthog?.capture(eventName, getNavProps());
+    }
     router.push(href);
     setOpen(false);
   };
 
-  const handleAgentNavigate = (agentId: string) => {
-    const params = new URLSearchParams({ id: agentId });
+  const handleAgentNavigate = (agent: Agent) => {
+    posthog?.capture("nav: agent", {
+      ...getNavProps(),
+      agent_id: agent.id,
+      agent_name: agent.name ?? `${agent.type} agent`,
+      agent_type: agent.type,
+    });
+    const params = new URLSearchParams({ id: agent.id });
     router.push(`/chatAgent?${params.toString()}`);
     setOpen(false);
   };
@@ -151,7 +186,7 @@ export function GlobalCommandMenu() {
               <CommandItem
                 key={agent.id}
                 value={agent.value}
-                onSelect={() => handleAgentNavigate(agent.id)}
+                onSelect={() => handleAgentNavigate(agent.agent)}
               >
                 {agent.label}
               </CommandItem>
@@ -166,7 +201,7 @@ export function GlobalCommandMenu() {
             <CommandItem
               key={item.href}
               value={item.label}
-              onSelect={() => handleNavigate(item.href)}
+              onSelect={() => handleNavigate(item.href, item.eventName)}
             >
               {item.label}
             </CommandItem>

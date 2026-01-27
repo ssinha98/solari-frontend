@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { auth, db } from "@/tools/firebase";
 import { collection, getDocs, deleteDoc, doc, getDoc } from "firebase/firestore";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { usePostHog } from "posthog-js/react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,6 +43,7 @@ interface SlackInstallation {
 
 export default function SlackCallbackPage() {
   const router = useRouter();
+  const posthog = usePostHog();
   const [installation, setInstallation] = useState<SlackInstallation | null>(
     null
   );
@@ -49,6 +51,8 @@ export default function SlackCallbackPage() {
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
   const [teamId, setTeamId] = useState<string | null>(null);
+  const [teamName, setTeamName] = useState<string>("");
+  const hasTrackedCompletion = useRef(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -70,6 +74,16 @@ export default function SlackCallbackPage() {
         if (!nextTeamId) {
           setInstallation(null);
           return;
+        }
+
+        const teamSnap = await getDoc(doc(db, "teams", nextTeamId));
+        if (teamSnap.exists()) {
+          const teamData = teamSnap.data();
+          setTeamName(
+            typeof teamData.team_name === "string" ? teamData.team_name : "",
+          );
+        } else {
+          setTeamName("");
         }
 
         // Fetch Slack installations
@@ -107,6 +121,29 @@ export default function SlackCallbackPage() {
 
     fetchData();
   }, []);
+
+  const getPosthogAuthProps = () => {
+    const eventProps: Record<string, string> = {};
+    const userId = auth.currentUser?.uid;
+    if (userId) {
+      eventProps.user_id = userId;
+    }
+    if (teamId) {
+      eventProps.team_id = teamId;
+    }
+    if (teamName) {
+      eventProps.team_name = teamName;
+    }
+    return eventProps;
+  };
+
+  useEffect(() => {
+    if (!installation || hasTrackedCompletion.current) {
+      return;
+    }
+    posthog?.capture("settings: slack_completed", getPosthogAuthProps());
+    hasTrackedCompletion.current = true;
+  }, [installation, posthog, teamId, teamName]);
 
   const handleRemoveConnection = async () => {
     try {

@@ -10,6 +10,7 @@ import { createAgent, updateAgentName } from "@/tools/agent_tools";
 import { auth, db } from "@/tools/firebase";
 import { doc, getDoc } from "firebase/firestore";
 import { toast } from "sonner";
+import { usePostHog } from "posthog-js/react";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +24,7 @@ import { Input } from "@/components/ui/input";
 
 function ChatAgentContent() {
   const router = useRouter();
+  const posthog = usePostHog();
   const [editMode, setEditMode] = useState(false);
   const [agentId, setAgentId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -30,10 +32,78 @@ function ChatAgentContent() {
   const [agentName, setAgentName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [canEditAgent, setCanEditAgent] = useState<boolean | null>(null);
+  const [teamId, setTeamId] = useState<string | null>(null);
+  const [teamName, setTeamName] = useState("");
+  const [resolvedAgentName, setResolvedAgentName] = useState("");
   const searchParams = useSearchParams();
   const hasCreatedRef = useRef(false);
 
   const displayName = searchParams.get("name") || "Source chat agent";
+
+  useEffect(() => {
+    const fetchAgentContext = async () => {
+      const user = auth.currentUser;
+      if (!user || !agentId) {
+        setTeamId(null);
+        setTeamName("");
+        setResolvedAgentName(displayName);
+        return;
+      }
+
+      try {
+        const userSnap = await getDoc(doc(db, "users", user.uid));
+        const nextTeamId = userSnap.exists()
+          ? (userSnap.data().teamId as string | undefined)
+          : undefined;
+        setTeamId(nextTeamId ?? null);
+
+        if (!nextTeamId) {
+          setTeamName("");
+          setResolvedAgentName(displayName);
+          return;
+        }
+
+        const teamSnap = await getDoc(doc(db, "teams", nextTeamId));
+        const nextTeamName = teamSnap.data()?.team_name;
+        setTeamName(typeof nextTeamName === "string" ? nextTeamName : "");
+
+        const agentSnap = await getDoc(
+          doc(db, "teams", nextTeamId, "agents", agentId),
+        );
+        const nextAgentName = agentSnap.data()?.name;
+        setResolvedAgentName(
+          typeof nextAgentName === "string" && nextAgentName
+            ? nextAgentName
+            : displayName,
+        );
+      } catch (error) {
+        console.error("Failed to load agent context:", error);
+        setTeamName("");
+        setResolvedAgentName(displayName);
+      }
+    };
+
+    fetchAgentContext();
+  }, [agentId, displayName]);
+
+  const getAgentEventProps = () => {
+    const eventProps: Record<string, string> = {};
+    const userId = auth.currentUser?.uid;
+    if (userId) {
+      eventProps.user_id = userId;
+    }
+    if (teamId) {
+      eventProps.team_id = teamId;
+    }
+    if (teamName) {
+      eventProps.team_name = teamName;
+    }
+    if (agentId) {
+      eventProps.agent_id = agentId;
+      eventProps.agent_name = resolvedAgentName || displayName;
+    }
+    return eventProps;
+  };
 
   useEffect(() => {
     const idFromParams = searchParams.get("id");
@@ -142,6 +212,10 @@ function ChatAgentContent() {
       setIsSaving(true);
       const trimmedName = agentName.trim();
       await updateAgentName(agentId, trimmedName);
+      posthog?.capture("create_new_agent: complete", {
+        ...getAgentEventProps(),
+        agent_name: trimmedName,
+      });
       setShowNameDialog(false);
       router.replace(
         `/chatAgent?id=${agentId}&edit=false&name=${encodeURIComponent(
@@ -178,6 +252,10 @@ function ChatAgentContent() {
                   );
                   return;
                 }
+                posthog?.capture(
+                  next ? "agent:edit_mode_on" : "agent:edit_mode_off",
+                  getAgentEventProps(),
+                );
                 setEditMode(next);
               }}
             />

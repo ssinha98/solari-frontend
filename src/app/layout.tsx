@@ -5,6 +5,7 @@ import { AuthWrapper } from "@/components/auth-wrapper";
 import { BillingWrapper } from "@/components/billing-wrapper";
 import { ConditionalLayout } from "@/components/conditional-layout";
 import { Toaster } from "@/components/ui/toaster";
+import { PostHogProvider } from "@/components/posthog-provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,12 +32,14 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <AuthWrapper>
-          <BillingWrapper>
-            <ConditionalLayout>{children}</ConditionalLayout>
-          </BillingWrapper>
-        </AuthWrapper>
-        <Toaster />
+        <PostHogProvider>
+          <AuthWrapper>
+            <BillingWrapper>
+              <ConditionalLayout>{children}</ConditionalLayout>
+            </BillingWrapper>
+          </AuthWrapper>
+          <Toaster />
+        </PostHogProvider>
       </body>
     </html>
   );

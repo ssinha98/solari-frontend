@@ -56,6 +56,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { usePostHog } from "posthog-js/react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -287,6 +288,7 @@ function getSourceTypeIcon(type: string) {
 
 export function ConfigureChat({ agentId }: { agentId: string | null }) {
   const router = useRouter();
+  const posthog = usePostHog();
   const [currentSources, setCurrentSources] = useState<Source[]>([]);
   const [isLoadingSources, setIsLoadingSources] = useState(false);
   const [isAddSourcePreparing, setIsAddSourcePreparing] = useState(false);
@@ -361,6 +363,7 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
   > | null>(null);
   const [ratingStatsLoading, setRatingStatsLoading] = useState(false);
   const [teamId, setTeamId] = useState<string | null>(null);
+  const [teamName, setTeamName] = useState<string>("");
   const [agentName, setAgentName] = useState<string>("");
   const [slackTranscriptSource, setSlackTranscriptSource] =
     useState<Source | null>(null);
@@ -390,6 +393,45 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
 
     fetchTeamId();
   }, []);
+
+  useEffect(() => {
+    const fetchTeamName = async () => {
+      if (!teamId) {
+        setTeamName("");
+        return;
+      }
+
+      try {
+        const teamSnap = await getDoc(doc(db, "teams", teamId));
+        const nextTeamName = teamSnap.data()?.team_name;
+        setTeamName(typeof nextTeamName === "string" ? nextTeamName : "");
+      } catch (error) {
+        console.error("Failed to load team name:", error);
+        setTeamName("");
+      }
+    };
+
+    fetchTeamName();
+  }, [teamId]);
+
+  const getAgentEventProps = () => {
+    const eventProps: Record<string, string> = {};
+    const userId = auth.currentUser?.uid;
+    if (userId) {
+      eventProps.user_id = userId;
+    }
+    if (teamId) {
+      eventProps.team_id = teamId;
+    }
+    if (teamName) {
+      eventProps.team_name = teamName;
+    }
+    if (agentId) {
+      eventProps.agent_id = agentId;
+      eventProps.agent_name = agentName || "agent";
+    }
+    return eventProps;
+  };
 
   useEffect(() => {
     if (!addMemberDialogOpen) {
@@ -947,6 +989,12 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
         );
       }
 
+      posthog?.capture("agent:source_deleted", {
+        ...getAgentEventProps(),
+        source_type: source.type || "",
+        source_nickname: source.nickname || source.title || source.name || "",
+      });
+
       // Sources will be updated automatically via Firestore listener
       toast.success("Source deleted successfully");
       setDeleteDialogOpen(false);
@@ -1038,6 +1086,27 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
       }
 
       if (response.success) {
+        const failureEmails = new Set(
+          (response.failures ?? [])
+            .map((failure) => failure.email)
+            .filter(Boolean) as string[],
+        );
+        const memberByEmail = new Map(
+          selectedMembers
+            .filter((member) => member.email)
+            .map((member) => [member.email as string, member]),
+        );
+        membersPayload
+          .filter((member) => member.email && !failureEmails.has(member.email))
+          .forEach((member) => {
+            const memberInfo = memberByEmail.get(member.email);
+            posthog?.capture("agent: updated_member_permission", {
+              ...getAgentEventProps(),
+              member_email: member.email,
+              member_name: memberInfo?.displayName || "",
+              member_role: member.permission,
+            });
+          });
         try {
           const refreshed = await listAgentMembers(teamId, agentId);
           if (refreshed.success) {
@@ -1105,6 +1174,13 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
               : member,
           ),
         );
+        const memberInfo = agentMembers.find((member) => member.id === memberId);
+        posthog?.capture("agent: updated_member_permission", {
+          ...getAgentEventProps(),
+          member_email: email,
+          member_name: memberInfo?.displayName || "",
+          member_role: permission,
+        });
         return;
       }
 
@@ -1225,6 +1301,7 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
         "website",
         websiteUrl.trim(),
       );
+      posthog?.capture("agent:add_source_website", getAgentEventProps());
 
       // Sources will be updated automatically via Firestore listener
       // Close the dialog and reset form
@@ -1422,6 +1499,7 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
         filePath,
         documentDescription.trim() || undefined,
       );
+      posthog?.capture("agent:add_source_document", getAgentEventProps());
 
       // Sources will be updated automatically via Firestore listener
       // Close the dialog and reset form
@@ -1525,6 +1603,7 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
         fileName,
         filePath,
       );
+      posthog?.capture("agent:add_source_table", getAgentEventProps());
 
       // Get user ID for API call
       const user = auth.currentUser;
@@ -1624,6 +1703,12 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
         tableSourcePendingReview.nickname,
         tableSourcePendingReview.filePath,
       );
+
+      posthog?.capture("agent:source_deleted", {
+        ...getAgentEventProps(),
+        source_type: "table",
+        source_nickname: tableSourcePendingReview.nickname,
+      });
 
       // Reset state and close dialog
       setTableSourcePendingReview(null);
@@ -1940,6 +2025,8 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
         throw new Error(data.error || "Failed to add Jira tickets");
       }
 
+      posthog?.capture("agent:add_source_jira", getAgentEventProps());
+
       // Sources will be updated automatically via Firestore listener
       setHasJiraSource(true);
 
@@ -2180,6 +2267,8 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
         throw new Error(data.error || "Failed to add Confluence pages");
       }
 
+      posthog?.capture("agent:add_source_confluence", getAgentEventProps());
+
       // Sources will be updated automatically via Firestore listener
       setHasConfluenceSource(true);
 
@@ -2242,6 +2331,12 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
       if (data.status !== "success") {
         throw new Error(data.error || "Failed to delete Confluence page");
       }
+
+      posthog?.capture("agent:source_deleted", {
+        ...getAgentEventProps(),
+        source_type: "confluence_page",
+        source_nickname: nickname,
+      });
 
       toast.success("Confluence page deleted successfully");
     } catch (error) {
@@ -2499,6 +2594,8 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
         );
         return [...prev, ...newItems];
       });
+
+      posthog?.capture("agent:add_source_slack", getAgentEventProps());
 
       toast.success(
         `Started batch sync for ${selectedChannels.length} Slack channel(s)`,
@@ -5772,6 +5869,10 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
             <Button
               onClick={() => {
                 if (agentId) {
+                  posthog?.capture(
+                    "agent:analytics_viewed",
+                    getAgentEventProps(),
+                  );
                   router.push(`/agent-analytics?id=${agentId}`);
                 }
               }}
@@ -6219,6 +6320,16 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
                   );
                   if (response.success) {
                     toast.success("removed member from agent");
+                    const memberInfo = agentMembers.find(
+                      (member) => member.id === memberToRemove.id,
+                    );
+                    posthog?.capture("agent: updated_member_permission", {
+                      ...getAgentEventProps(),
+                      member_email: memberToRemove.email || "",
+                      member_name: memberInfo?.displayName || "",
+                      member_role:
+                        memberInfo?.permission || memberInfo?.role || "",
+                    });
                     await refreshAgentMembers();
                     setMemberToRemove(null);
                     setRemoveMemberDialogOpen(false);

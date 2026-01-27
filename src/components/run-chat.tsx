@@ -33,6 +33,7 @@ import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 import { CustomEditor } from "@/components/custom-editor";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { usePostHog } from "posthog-js/react";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -341,6 +342,7 @@ interface Message {
 }
 
 export function RunChat({ agentId }: { agentId: string | null }) {
+  const posthog = usePostHog();
   const [sourcesExpanded, setSourcesExpanded] = useState(true);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -357,6 +359,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
   const [noteText, setNoteText] = useState("");
   const [agentName, setAgentName] = useState<string>("");
   const [teamId, setTeamId] = useState<string | null>(null);
+  const [teamName, setTeamName] = useState<string>("");
   const [modelProvider, setModelProvider] = useState(DEFAULT_MODEL_PROVIDER);
   const [sourceSelectionDialogOpen, setSourceSelectionDialogOpen] =
     useState(false);
@@ -368,6 +371,25 @@ export function RunChat({ agentId }: { agentId: string | null }) {
   );
   const countdownTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const editorRef = useRef<any>(null);
+
+  const getAgentEventProps = () => {
+    const eventProps: Record<string, string> = {};
+    const userId = auth.currentUser?.uid;
+    if (userId) {
+      eventProps.user_id = userId;
+    }
+    if (teamId) {
+      eventProps.team_id = teamId;
+    }
+    if (teamName) {
+      eventProps.team_name = teamName;
+    }
+    if (agentId) {
+      eventProps.agent_id = agentId;
+      eventProps.agent_name = agentName || "Source chat agent";
+    }
+    return eventProps;
+  };
 
   const handleModelProviderChange = async (value: string) => {
     setModelProvider(value);
@@ -455,6 +477,14 @@ export function RunChat({ agentId }: { agentId: string | null }) {
         targetMessage.ratingDocId,
       );
       await updateDoc(ratingRef, { rating: nextRating });
+      if (nextRating) {
+        posthog?.capture("agent: rated", {
+          ...getAgentEventProps(),
+          rating_type: "thumb",
+          rating_value: nextRating,
+          response_content: targetMessage.content,
+        });
+      }
     } catch (error) {
       console.error("Failed to update rating:", error);
     }
@@ -489,6 +519,12 @@ export function RunChat({ agentId }: { agentId: string | null }) {
           msg.id === noteMessageId ? { ...msg, notes: noteText } : msg,
         ),
       );
+      posthog?.capture("agent: rated", {
+        ...getAgentEventProps(),
+        rating_type: "note",
+        rating_value: noteText,
+        response_content: targetMessage.content,
+      });
       setNoteDialogOpen(false);
       setNoteMessageId(null);
       setNoteText("");
@@ -598,7 +634,8 @@ export function RunChat({ agentId }: { agentId: string | null }) {
   const handleSend = async (textContent?: string) => {
     // Get text from parameter (from Enter key) or from editor (from button click)
     const content = textContent || editorRef.current?.getText() || "";
-    if (!content.trim()) return;
+    const trimmedContent = content.trim();
+    if (!trimmedContent) return;
 
     const user = auth.currentUser;
     if (!user) {
@@ -611,8 +648,13 @@ export function RunChat({ agentId }: { agentId: string | null }) {
     const newMessage: Message = {
       id: Date.now().toString(),
       role: "user",
-      content: content,
+      content: trimmedContent,
     };
+
+    posthog?.capture("agent: sent_message", {
+      ...getAgentEventProps(),
+      message_content: trimmedContent,
+    });
 
     setMessages((prev) => [...prev, newMessage]);
     setMessage("");
@@ -641,7 +683,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
       }
 
       // Extract mention nickname if present
-      const nickname = extractMentionNickname(content);
+      const nickname = extractMentionNickname(trimmedContent);
 
       // Log extracted nickname for debugging
       // console.log("=== Message Send Debug ===");
@@ -667,7 +709,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
         user.uid,
         teamId,
         namespace,
-        content,
+        trimmedContent,
         agentId,
         nickname,
         requestId,
@@ -690,7 +732,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
             chosenNickname: response.chosen_nickname,
             sourceSuggestion: response.chosen_nickname,
             countdown: 5,
-            query: content,
+            query: trimmedContent,
             namespace: namespace,
             agentId: agentId,
             userId: user.uid,
@@ -707,7 +749,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
           response.response_summarized || response.answer || "";
         const ratingDocId = await createRatingDoc(
           response.requestId || requestId,
-          content,
+          trimmedContent,
           answerText,
           response.chosen_nickname || "",
           response.chosen_nickname || "",
@@ -722,6 +764,10 @@ export function RunChat({ agentId }: { agentId: string | null }) {
           table: response.table,
           ratingDocId: ratingDocId || response.requestId || requestId,
         };
+        posthog?.capture("agent:response", {
+          ...getAgentEventProps(),
+          response_content: answerText,
+        });
 
         setMessages((prev) => [...prev, assistantMessage]);
       } else {
@@ -794,6 +840,11 @@ export function RunChat({ agentId }: { agentId: string | null }) {
         response.suggestedSource || sourceSuggestion || "",
         false,
       );
+
+      posthog?.capture("agent:response", {
+        ...getAgentEventProps(),
+        response_content: answerText,
+      });
 
       setMessages((prevMessages) =>
         prevMessages.map((msg) =>
@@ -918,6 +969,26 @@ export function RunChat({ agentId }: { agentId: string | null }) {
 
     fetchTeamId();
   }, []);
+
+  useEffect(() => {
+    const fetchTeamName = async () => {
+      if (!teamId) {
+        setTeamName("");
+        return;
+      }
+
+      try {
+        const teamSnap = await getDoc(doc(db, "teams", teamId));
+        const nextTeamName = teamSnap.data()?.team_name;
+        setTeamName(typeof nextTeamName === "string" ? nextTeamName : "");
+      } catch (error) {
+        console.error("Failed to load team name:", error);
+        setTeamName("");
+      }
+    };
+
+    fetchTeamName();
+  }, [teamId]);
 
   // Fetch sources from Firestore when agentId is available
   useEffect(() => {
@@ -1071,11 +1142,21 @@ export function RunChat({ agentId }: { agentId: string | null }) {
                     }`}
                     onClick={() => {
                       if (msg.role === "assistant" && msg.metadata) {
+                        posthog?.capture("agent: response_details_opened", {
+                          ...getAgentEventProps(),
+                          response_content: msg.content,
+                        });
                         setSelectedMetadata(msg.metadata);
                       } else if (
                         msg.role === "assistant" &&
                         msg.pendingConfirmation
                       ) {
+        posthog?.capture("agent: source_corrected", {
+          ...getAgentEventProps(),
+          source_suggestion: msg.pendingConfirmation.sourceSuggestion,
+          chosen_nickname: msg.pendingConfirmation.chosenNickname,
+          query: msg.pendingConfirmation.query,
+        });
                         setPendingConfirmationMessageId(msg.id);
                         setSourceSelectionDialogOpen(true);
                         // Clear the countdown timer when dialog opens

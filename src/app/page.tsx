@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ArrowLeft,
   CheckCircle2,
   Clock,
   Copy,
@@ -48,6 +49,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { getTeamAgents, Agent } from "@/tools/agent_tools";
 import { auth, db } from "@/tools/firebase";
+import { usePostHog } from "posthog-js/react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -103,6 +105,7 @@ function getAgentTypeLabel(type: string) {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const posthog = usePostHog();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isLoadingAgents, setIsLoadingAgents] = useState(true);
@@ -128,6 +131,22 @@ export default function DashboardPage() {
   const [hasInvitedMembers, setHasInvitedMembers] = useState(false);
   const [emailInviteFromAdmin, setEmailInviteFromAdmin] = useState(false);
   const [showPaymentAlternative, setShowPaymentAlternative] = useState(false);
+
+  const getPosthogAuthProps = () => {
+    const eventProps: Record<string, string> = {};
+    const userId = auth.currentUser?.uid;
+    if (userId) {
+      eventProps.user_id = userId;
+    }
+    if (teamId) {
+      eventProps.team_id = teamId;
+    }
+    const resolvedTeamName = onboardingTeamName || teamName.trim();
+    if (resolvedTeamName) {
+      eventProps.team_name = resolvedTeamName;
+    }
+    return eventProps;
+  };
   const [isStartingTrial, setIsStartingTrial] = useState(false);
   const [billingSuccess, setBillingSuccess] = useState(false);
   const [isBookingSetup, setIsBookingSetup] = useState(false);
@@ -454,6 +473,7 @@ export default function DashboardPage() {
 
   const handleCopyInviteCode = async () => {
     try {
+      posthog?.capture("acces_code_copied", getPosthogAuthProps());
       if (!formattedInviteCode) {
         toast.error("Invite code is not ready yet.");
         return;
@@ -471,12 +491,23 @@ export default function DashboardPage() {
   };
 
   const handleInviteByEmail = () => {
+    posthog?.capture("invite_member_email", getPosthogAuthProps());
     setEmailInviteFromAdmin(isTeamAdmin);
     setHasInvitedMembers(false);
     setInviteButtonLabel("Invite");
     setTeamDialogOpen(false);
     setMemberDialogOpen(false);
     setIsEmailDialogOpen(true);
+  };
+
+  const handleEmailInviteBack = () => {
+    setIsEmailDialogOpen(false);
+    if (emailInviteFromAdmin) {
+      setTeamDialogOpen(true);
+      setTeamDialogStep(2);
+    } else {
+      setMemberDialogOpen(true);
+    }
   };
 
   const handleAddEmail = () => {
@@ -554,6 +585,7 @@ export default function DashboardPage() {
   };
 
   const handleCreatorDone = () => {
+    posthog?.capture("onboarding_invite_members_next", getPosthogAuthProps());
     setTeamDialogOpen(true);
     setTeamDialogStep(3);
   };
@@ -566,6 +598,10 @@ export default function DashboardPage() {
 
     setBillingSuccess(false);
     setIsStartingTrial(true);
+    posthog?.capture("onboarding: starts_subscription", {
+      ...getPosthogAuthProps(),
+      billing_mode: isFreeTrialing ? "trial" : "subscription",
+    });
 
     try {
       const response = await fetch("/api/stripe/create_checkout_session", {
@@ -614,6 +650,10 @@ export default function DashboardPage() {
               billingStatusUnsubRef.current();
               billingStatusUnsubRef.current = null;
             }
+            posthog?.capture(
+              "onboarding: access_granted (stripe)",
+              getPosthogAuthProps(),
+            );
             setBillingSuccess(true);
             setIsStartingTrial(false);
             if (billingSuccessTimeoutRef.current) {
@@ -651,6 +691,7 @@ export default function DashboardPage() {
 
     setBookingSuccess(false);
     setIsBookingSetup(true);
+    posthog?.capture("onboarding: opens_calendar", getPosthogAuthProps());
 
     try {
       const response = await fetch("/api/cal/create_appointment", {
@@ -694,6 +735,10 @@ export default function DashboardPage() {
               billingStatusUnsubRef.current();
               billingStatusUnsubRef.current = null;
             }
+            posthog?.capture(
+              "onboarding: access_granted (calendar)",
+              getPosthogAuthProps(),
+            );
             setBookingSuccess(true);
             setIsBookingSetup(false);
             if (billingSuccessTimeoutRef.current) {
@@ -738,9 +783,17 @@ export default function DashboardPage() {
         toast.info("Workflow coming soon!");
         break;
       case "source chat":
+        posthog?.capture("create_new_agent: started", {
+          ...getPosthogAuthProps(),
+          agent_type: "source chat",
+        });
         router.push("/chatAgent?new=true");
         break;
       case "copilot":
+        posthog?.capture("create_new_agent: started", {
+          ...getPosthogAuthProps(),
+          agent_type: "copilot",
+        });
         router.push("/copilotAgent?new=true");
         break;
       default:
@@ -1121,11 +1174,21 @@ export default function DashboardPage() {
       </AlertDialog>
       <AlertDialog open={isEmailDialogOpen} onOpenChange={setIsEmailDialogOpen}>
         <AlertDialogContent className="max-h-[80vh] overflow-hidden flex flex-col">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-2xl font-bold">
+          <AlertDialogHeader className="relative">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={handleEmailInviteBack}
+              className="absolute left-0 top-0"
+              aria-label="Back"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <AlertDialogTitle className="text-2xl font-bold pl-10">
               Invite team members
             </AlertDialogTitle>
-            <AlertDialogDescription>
+            <AlertDialogDescription className="pl-10">
               Add email addresses to invite your teammates.
             </AlertDialogDescription>
           </AlertDialogHeader>

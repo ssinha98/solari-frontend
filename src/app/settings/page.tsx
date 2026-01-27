@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import Image from "next/image";
 import { Copy, Loader2 } from "lucide-react";
 import { getBackendUrl } from "@/tools/backend-config";
+import { usePostHog } from "posthog-js/react";
 import {
   InputOTP,
   InputOTPGroup,
@@ -18,6 +19,7 @@ import {
 } from "@/components/ui/input-otp";
 
 export default function SettingsPage() {
+  const posthog = usePostHog();
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [hasJiraAccessToken, setHasJiraAccessToken] = useState<boolean | null>(
     null
@@ -30,6 +32,7 @@ export default function SettingsPage() {
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [isLoadingInviteCode, setIsLoadingInviteCode] = useState(false);
   const [teamId, setTeamId] = useState<string | null>(null);
+  const [teamName, setTeamName] = useState<string>("");
   const [isBillingLoading, setIsBillingLoading] = useState(false);
   const [profile, setProfile] = useState<{
     photoURL?: string | null;
@@ -74,9 +77,13 @@ export default function SettingsPage() {
               const teamData = teamSnap.data();
               setHasJiraAccessToken(!!teamData.jira_access_token);
               setInviteCode((teamData.invite_code as string) || null);
+              setTeamName(
+                typeof teamData.team_name === "string" ? teamData.team_name : "",
+              );
             } else {
               setInviteCode(null);
               setHasJiraAccessToken(false);
+              setTeamName("");
             }
             setIsLoadingInviteCode(false);
             const memberSnap = await getDoc(doc(db, "teams", teamId, "users", user.uid));
@@ -144,6 +151,7 @@ export default function SettingsPage() {
   const handleSignOut = async () => {
     try {
       setIsSigningOut(true);
+      posthog?.capture("settings:sign out", getPosthogAuthProps());
       await signOut();
       // Redirect will be handled by AuthWrapper automatically
       router.push("/login");
@@ -151,6 +159,21 @@ export default function SettingsPage() {
       console.error("Failed to sign out:", error);
       setIsSigningOut(false);
     }
+  };
+
+  const getPosthogAuthProps = () => {
+    const eventProps: Record<string, string> = {};
+    const userId = auth.currentUser?.uid;
+    if (userId) {
+      eventProps.user_id = userId;
+    }
+    if (teamId) {
+      eventProps.team_id = teamId;
+    }
+    if (teamName) {
+      eventProps.team_name = teamName;
+    }
+    return eventProps;
   };
 
   const handleJiraCallback = () => {
@@ -166,17 +189,22 @@ export default function SettingsPage() {
     }
 
     if (hasJiraAccessToken) {
+      posthog?.capture("settings: configure_atlassian", getPosthogAuthProps());
       router.push("/settings/jira_callback");
       return;
     }
 
-    window.location.href = `/api/jira/connect?uid=${encodeURIComponent(
-      user.uid
-    )}`;
+    posthog?.capture("settings: atlassian_started", getPosthogAuthProps());
+    window.open(
+      `/api/jira/connect?uid=${encodeURIComponent(user.uid)}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
   };
 
   const handleSlackCallback = async () => {
     if (hasSlackInstallation) {
+      posthog?.capture("settings: configure_slack", getPosthogAuthProps());
       router.push("/settings/slack_callback");
       return;
     }
@@ -188,6 +216,7 @@ export default function SettingsPage() {
     }
 
     try {
+      posthog?.capture("settings:slack_started", getPosthogAuthProps());
       setIsConnectingSlack(true);
       const response = await fetch("/api/slack/connect", {
         method: "POST",
@@ -253,6 +282,7 @@ export default function SettingsPage() {
         return;
       }
 
+      posthog?.capture("settings: manage billing", getPosthogAuthProps());
       const payload = {
         user_id: user.uid,
       };

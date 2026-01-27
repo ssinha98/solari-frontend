@@ -53,6 +53,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { usePostHog } from "posthog-js/react";
 
 type Agent = {
   agent_id: string;
@@ -69,6 +70,7 @@ type Member = {
 };
 
 export default function MembersPage() {
+  const posthog = usePostHog();
   const [members, setMembers] = useState<Member[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [teamId, setTeamId] = useState<string | null>(null);
@@ -209,6 +211,19 @@ export default function MembersPage() {
     inviteCode.length === 6
       ? `${inviteCode.slice(0, 3)}-${inviteCode.slice(3)}`
       : "";
+  const getPosthogAuthProps = () => {
+    const eventProps: Record<string, string> = {};
+    if (currentUserId) {
+      eventProps.user_id = currentUserId;
+    }
+    if (teamId) {
+      eventProps.team_id = teamId;
+    }
+    if (teamNameForInvite) {
+      eventProps.team_name = teamNameForInvite;
+    }
+    return eventProps;
+  };
 
   const handleRoleChange = async (
     memberId: string,
@@ -236,6 +251,10 @@ export default function MembersPage() {
       if (!response.ok) {
         throw new Error("Role update failed.");
       }
+      posthog?.capture("members: role_updated", {
+        ...getPosthogAuthProps(),
+        role: nextRole,
+      });
       toast.success("permission updated!");
     } catch (error) {
       console.error("Failed to update role:", error);
@@ -250,6 +269,7 @@ export default function MembersPage() {
 
   const handleAgentRoleChange = async (
     agentId: string,
+    agentName: string,
     nextRole: "edit" | "view" | "admin",
   ) => {
     if (!isAdmin) {
@@ -267,10 +287,6 @@ export default function MembersPage() {
     const previousRole =
       selectedMember.agents?.find((agent) => agent.agent_id === agentId)
         ?.role ?? "view";
-    const agentName =
-      selectedMember.agents?.find((agent) => agent.agent_id === agentId)
-        ?.agent_name ?? "";
-
     const updateLocalRole = (role: "edit" | "view" | "admin") => {
       setMembers((prev) =>
         prev.map((member) =>
@@ -303,6 +319,12 @@ export default function MembersPage() {
       await addAgentMembers(teamId, agentId, agentName, [
         { email: memberEmail, permission: nextRole },
       ]);
+      posthog?.capture("members: agent_role_updated", {
+        ...getPosthogAuthProps(),
+        role: nextRole,
+        agent_id: agentId,
+        agent_name: agentName,
+      });
       toast.success("Agent role updated.");
     } catch (error) {
       console.error("Failed to update agent role:", error);
@@ -426,6 +448,7 @@ export default function MembersPage() {
 
   const handleCopyInviteCode = async () => {
     try {
+      posthog?.capture("members: access_code_copied", getPosthogAuthProps());
       if (!formattedInviteCode) {
         toast.error("Invite code is not ready yet.");
         return;
@@ -443,6 +466,7 @@ export default function MembersPage() {
   };
 
   const handleInviteByEmail = () => {
+    posthog?.capture("members: invite_via_email_started", getPosthogAuthProps());
     setMemberDialogOpen(false);
     setIsEmailDialogOpen(true);
   };
@@ -478,6 +502,7 @@ export default function MembersPage() {
     }
 
     try {
+      posthog?.capture("members: send_invites_started", getPosthogAuthProps());
       setIsInvitingMembers(true);
       const response = await inviteTeamMembers(
         teamId,
@@ -485,6 +510,7 @@ export default function MembersPage() {
         currentUserId,
       );
       if (response.ok) {
+        posthog?.capture("members: invite_via_email_sent", getPosthogAuthProps());
         setInviteButtonLabel("Done");
         toast.success("Invitations sent!");
         await new Promise((resolve) => setTimeout(resolve, 400));
@@ -504,6 +530,7 @@ export default function MembersPage() {
   };
 
   const handleAgentsClick = (member: Member) => {
+    posthog?.capture("members: agents_drawer_opened", getPosthogAuthProps());
     setSelectedMember(member);
     setDrawerOpen(true);
   };
@@ -635,6 +662,7 @@ export default function MembersPage() {
                         ? handleRemoveRequest(agent)
                         : handleAgentRoleChange(
                             agent.agent_id,
+                            agent.agent_name ?? "agent",
                             value as "edit" | "view" | "admin",
                           )
                     }
@@ -839,7 +867,13 @@ export default function MembersPage() {
         <Button
           size="lg"
           className="rounded-lg px-6 h-14 shadow-lg hover:shadow-xl transition-shadow gap-2 bg-card text-card-foreground border border-border hover:bg-accent hover:text-accent-foreground"
-          onClick={() => setMemberDialogOpen(true)}
+          onClick={() => {
+            posthog?.capture(
+              "members: invite_new_members_opened",
+              getPosthogAuthProps(),
+            );
+            setMemberDialogOpen(true);
+          }}
           disabled={!teamId}
         >
           <Plus className="h-5 w-5" />
