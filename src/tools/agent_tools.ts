@@ -51,7 +51,7 @@ export interface Source {
 export async function createAgent(
   type: AgentType,
   teamId: string,
-  userId: string
+  userId: string,
 ): Promise<string> {
   try {
     const user = auth.currentUser;
@@ -82,7 +82,7 @@ export async function createAgent(
       "agents",
       docRef.id,
       "agent-members",
-      userId
+      userId,
     );
     await setDoc(agentMemberRef, {
       uid: userId,
@@ -108,7 +108,7 @@ export async function createAgent(
 export async function getTeamAgents(
   teamId: string,
   userId: string,
-  options?: { includeAllForAdmins?: boolean }
+  options?: { includeAllForAdmins?: boolean },
 ): Promise<Agent[]> {
   try {
     const user = auth.currentUser;
@@ -118,7 +118,9 @@ export async function getTeamAgents(
 
     let isAdmin = false;
     if (options?.includeAllForAdmins) {
-      const teamUserSnap = await getDoc(doc(db, "teams", teamId, "users", userId));
+      const teamUserSnap = await getDoc(
+        doc(db, "teams", teamId, "users", userId),
+      );
       if (teamUserSnap.exists()) {
         const role = teamUserSnap.data().role as string | undefined;
         isAdmin = role === "admin";
@@ -135,7 +137,7 @@ export async function getTeamAgents(
           ({
             id: docSnap.id,
             ...docSnap.data(),
-          }) as Agent
+          }) as Agent,
       );
     }
 
@@ -148,7 +150,7 @@ export async function getTeamAgents(
           "agents",
           docSnap.id,
           "agent-members",
-          userId
+          userId,
         );
         const memberSnap = await getDoc(memberRef);
         if (!memberSnap.exists()) {
@@ -158,7 +160,7 @@ export async function getTeamAgents(
           id: docSnap.id,
           ...docSnap.data(),
         } as Agent;
-      })
+      }),
     );
 
     return agents.filter(Boolean) as Agent[];
@@ -176,7 +178,7 @@ export async function getTeamAgents(
  */
 export async function updateAgentName(
   agentId: string,
-  name: string
+  name: string,
 ): Promise<void> {
   try {
     const user = auth.currentUser;
@@ -207,9 +209,7 @@ export async function updateAgentName(
       const agents = Array.isArray(data.agents) ? data.agents : [];
       const updatedAgents = agents.map(
         (agent: { agent_id?: string; agent_name?: string; role?: string }) =>
-          agent.agent_id === agentId
-            ? { ...agent, agent_name: name }
-            : agent
+          agent.agent_id === agentId ? { ...agent, agent_name: name } : agent,
       );
       await updateDoc(teamUserRef, {
         agents: updatedAgents,
@@ -229,7 +229,7 @@ export async function updateAgentName(
  */
 export async function getAgentSources(
   teamId: string,
-  agentId: string
+  agentId: string,
 ): Promise<Source[]> {
   try {
     const user = auth.currentUser;
@@ -243,7 +243,7 @@ export async function getAgentSources(
       teamId,
       "agents",
       agentId,
-      "sources"
+      "sources",
     );
     const querySnapshot = await getDocs(sourcesRef);
 
@@ -278,7 +278,7 @@ async function addOrUpdateUserSource(
   type: string,
   name?: string,
   filePath?: string,
-  description?: string
+  description?: string,
 ): Promise<void> {
   try {
     const user = auth.currentUser;
@@ -359,7 +359,7 @@ export async function convertToCSV(file: File): Promise<File> {
 export async function uploadSourceFile(
   file: File,
   nickname: string,
-  sourceType?: string
+  sourceType?: string,
 ): Promise<string> {
   try {
     const user = auth.currentUser;
@@ -417,10 +417,10 @@ export async function uploadSourceFile(
         (error) => {
           console.error(
             "Failed to upload document to Pinecone (non-blocking):",
-            error
+            error,
           );
           // Don't throw - allow Firestore save to proceed
-        }
+        },
       );
     }
 
@@ -450,7 +450,7 @@ export async function addAgentSource(
   type: string,
   name?: string,
   filePath?: string,
-  description?: string
+  description?: string,
 ): Promise<string> {
   const user = auth.currentUser;
   if (!user) {
@@ -468,7 +468,7 @@ export async function addAgentSource(
       teamId,
       "agents",
       agentId,
-      "sources"
+      "sources",
     );
     docRef = await addDoc(sourcesRef, {
       nickname,
@@ -481,7 +481,7 @@ export async function addAgentSource(
     });
     console.log(
       "✓ Successfully added to agent's sources subcollection:",
-      docRef.id
+      docRef.id,
     );
   } catch (error: any) {
     console.error("✗ FAILED at Step 1 (adding to agent's sources):", error);
@@ -501,7 +501,7 @@ export async function addAgentSource(
       type,
       name,
       filePath,
-      description
+      description,
     );
     console.log("✓ Successfully added to team's sources subcollection");
   } catch (error: any) {
@@ -510,7 +510,7 @@ export async function addAgentSource(
     console.error("Full error:", error);
     // Don't throw here - we already added to agent's sources, so log but continue
     console.warn(
-      "Warning: Source added to agent but failed to update team's sources collection"
+      "Warning: Source added to agent but failed to update team's sources collection",
     );
   }
 
@@ -532,7 +532,7 @@ export async function updateSourceNickname(
   sourceId: string,
   newNickname: string,
   oldNickname: string,
-  type: string
+  type: string,
 ): Promise<void> {
   try {
     const user = auth.currentUser;
@@ -548,7 +548,7 @@ export async function updateSourceNickname(
       "agents",
       agentId,
       "sources",
-      sourceId
+      sourceId,
     );
     await updateDoc(agentSourceRef, {
       nickname: newNickname,
@@ -560,7 +560,7 @@ export async function updateSourceNickname(
     const q = query(
       userSourcesRef,
       where("nickname", "==", oldNickname),
-      where("type", "==", type)
+      where("type", "==", type),
     );
     const querySnapshot = await getDocs(q);
 
@@ -599,7 +599,7 @@ export async function updateSourceDescription(
   sourceId: string,
   newDescription: string,
   nickname: string,
-  type: string
+  type: string,
 ): Promise<void> {
   try {
     const user = auth.currentUser;
@@ -615,7 +615,7 @@ export async function updateSourceDescription(
       "agents",
       agentId,
       "sources",
-      sourceId
+      sourceId,
     );
     await updateDoc(agentSourceRef, {
       description: newDescription || null,
@@ -627,7 +627,7 @@ export async function updateSourceDescription(
     const q = query(
       userSourcesRef,
       where("nickname", "==", nickname),
-      where("type", "==", type)
+      where("type", "==", type),
     );
     const querySnapshot = await getDocs(q);
 
@@ -664,7 +664,7 @@ export async function deleteSource(
   agentId: string,
   sourceId: string,
   nickname: string,
-  type: string
+  type: string,
 ): Promise<void> {
   try {
     const user = auth.currentUser;
@@ -680,7 +680,7 @@ export async function deleteSource(
       "agents",
       agentId,
       "sources",
-      sourceId
+      sourceId,
     );
 
     // If this is a Slack channel source, delete the transcript_chunks subcollection first
@@ -694,17 +694,17 @@ export async function deleteSource(
           agentId,
           "sources",
           sourceId,
-          "transcript_chunks"
+          "transcript_chunks",
         );
         const transcriptChunksSnapshot = await getDocs(transcriptChunksRef);
-        
+
         // Delete all documents in the transcript_chunks subcollection
         const deletePromises = transcriptChunksSnapshot.docs.map((chunkDoc) =>
-          deleteDoc(doc(transcriptChunksRef, chunkDoc.id))
+          deleteDoc(doc(transcriptChunksRef, chunkDoc.id)),
         );
         await Promise.all(deletePromises);
         console.log(
-          `✓ Deleted ${transcriptChunksSnapshot.docs.length} transcript chunk(s)`
+          `✓ Deleted ${transcriptChunksSnapshot.docs.length} transcript chunk(s)`,
         );
       } catch (error) {
         console.error("Error deleting transcript_chunks subcollection:", error);
@@ -719,7 +719,7 @@ export async function deleteSource(
     const q = query(
       userSourcesRef,
       where("nickname", "==", nickname),
-      where("type", "==", type)
+      where("type", "==", type),
     );
     const querySnapshot = await getDocs(q);
 
@@ -763,7 +763,7 @@ export async function deleteTableSource(
   agentId: string,
   sourceId: string,
   nickname: string,
-  filePath: string
+  filePath: string,
 ): Promise<void> {
   try {
     const user = auth.currentUser;
@@ -791,7 +791,7 @@ export async function deleteTableSource(
       "agents",
       agentId,
       "sources",
-      sourceId
+      sourceId,
     );
     await deleteDoc(agentSourceRef);
     console.log("✓ Deleted from agent's sources");
@@ -801,7 +801,7 @@ export async function deleteTableSource(
     const q = query(
       userSourcesRef,
       where("nickname", "==", nickname),
-      where("type", "==", "table")
+      where("type", "==", "table"),
     );
     const querySnapshot = await getDocs(q);
 

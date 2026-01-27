@@ -298,10 +298,7 @@ function renderTextWithMentions(text: string, mentionLabels: string[] = []) {
 
     // Add the mention with styling
     parts.push(
-      <span
-        key={match.index}
-        className="font-bold text-white"
-      >
+      <span key={match.index} className="font-bold text-white">
         {match.text}
       </span>,
     );
@@ -963,9 +960,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
         if (agentSnap.exists()) {
           const agentData = agentSnap.data();
           setAgentName(agentData.name || "Source chat agent");
-          setModelProvider(
-            agentData.model_provider || DEFAULT_MODEL_PROVIDER,
-          );
+          setModelProvider(agentData.model_provider || DEFAULT_MODEL_PROVIDER);
         }
       } catch (error) {
         console.error("Failed to fetch agent name:", error);

@@ -857,7 +857,8 @@ export default function DashboardPage() {
                 </AlertDialogDescription>
                 <AlertDialogDescription>
                   Here’s a 6 digit code you can send them to let them join this
-                  space. (Don’t worry you can always find this in Members and Permissions).
+                  space. (Don’t worry you can always find this in Members and
+                  Permissions).
                 </AlertDialogDescription>
               </>
             ) : (
@@ -1074,7 +1075,7 @@ export default function DashboardPage() {
             <AlertDialogDescription>
               <span className="italic">
                 (Don't worry about losing this code, you can always find it in
-                  Members and Permissions)
+                Members and Permissions)
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>

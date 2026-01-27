@@ -104,7 +104,7 @@ export default function LoginPage() {
       const createdTeamId = await createOrUpdateUserDocument(
         result.user,
         isExistingUser ? undefined : (selectedOption ?? undefined),
-        inviteCode.trim()
+        inviteCode.trim(),
       );
       if (createdTeamId) {
         sessionStorage.setItem("createdTeamId", createdTeamId);
@@ -116,7 +116,9 @@ export default function LoginPage() {
         error instanceof Error &&
         error.message === "Invalid invite code."
       ) {
-        toast.error("Oops! Couldn't find a team with that code. Please try again.");
+        toast.error(
+          "Oops! Couldn't find a team with that code. Please try again.",
+        );
       } else {
         console.error("Error signing in with Google:", error);
       }

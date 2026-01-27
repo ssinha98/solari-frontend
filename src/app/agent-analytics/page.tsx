@@ -62,7 +62,7 @@ function AgentAnalyticsContent() {
   const searchParams = useSearchParams();
   const agentId = searchParams.get("id");
   const [userId, setUserId] = useState<string | null>(
-    auth.currentUser?.uid || null
+    auth.currentUser?.uid || null,
   );
   const [teamId, setTeamId] = useState<string | null>(null);
   const [ratings, setRatings] = useState<RatingDoc[]>([]);
@@ -70,7 +70,7 @@ function AgentAnalyticsContent() {
   const [selectedRow, setSelectedRow] = useState<RatingRow | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedSection, setSelectedSection] = useState<SectionKey | null>(
-    null
+    null,
   );
   const sectionRefs = useRef<Record<SectionKey, HTMLDivElement | null>>({
     question: null,
@@ -125,7 +125,7 @@ function AgentAnalyticsContent() {
       teamId,
       "agents",
       agentId,
-      "ratings"
+      "ratings",
     );
 
     const unsubscribe = onSnapshot(
@@ -142,7 +142,7 @@ function AgentAnalyticsContent() {
         console.error("Failed to load ratings:", error);
         setRatings([]);
         setIsLoading(false);
-      }
+      },
     );
 
     return () => unsubscribe();

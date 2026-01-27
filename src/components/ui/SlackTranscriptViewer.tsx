@@ -93,7 +93,7 @@ export default function SlackTranscriptViewer(props: {
     const slackOpen =
       teamId && channelId
         ? `https://slack.com/app_redirect?team=${encodeURIComponent(
-            teamId
+            teamId,
           )}&channel=${encodeURIComponent(channelId)}`
         : null;
 

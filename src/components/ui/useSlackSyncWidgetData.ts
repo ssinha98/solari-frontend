@@ -47,7 +47,7 @@ function detailsFromQueueItem(item: SlackQueueItem): string | null {
 
 function rowsFromBatchDocs(
   batchDocs: SlackBatchDoc[],
-  pageTeamId: string | null
+  pageTeamId: string | null,
 ): SlackSyncRow[] {
   const out: SlackSyncRow[] = [];
 
@@ -95,7 +95,7 @@ export function useSlackSyncWidgetData(
   teamId: string | null,
   agentId: string,
   slackTeamId: string | null,
-  uid: string | null
+  uid: string | null,
 ) {
   const [rows, setRows] = React.useState<SlackSyncRow[]>([]);
   const [visible, setVisible] = React.useState(false);
@@ -119,7 +119,7 @@ export function useSlackSyncWidgetData(
       uid,
       "agents",
       agentId,
-      "slack_pinecone_batches"
+      "slack_pinecone_batches",
     );
 
     // Listen to recent batch docs and filter client-side.

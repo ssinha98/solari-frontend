@@ -908,10 +908,8 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
           toast.error("User must be authenticated");
           return;
         }
-        const pageId =
-          source.page_id || source.confluence_page_id || source.id;
-        const nickname =
-          source.nickname || source.title || source.name || "";
+        const pageId = source.page_id || source.confluence_page_id || source.id;
+        const nickname = source.nickname || source.title || source.name || "";
 
         if (!pageId || !nickname) {
           toast.error("Missing Confluence page details");
@@ -940,13 +938,13 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
           throw new Error(data.error || "Failed to delete Confluence page");
         }
       } else {
-      await deleteSource(
-        teamId,
-        agentId,
-        sourceToDelete.id,
-        source.nickname || "",
-        source.type || "",
-      );
+        await deleteSource(
+          teamId,
+          agentId,
+          sourceToDelete.id,
+          source.nickname || "",
+          source.type || "",
+        );
       }
 
       // Sources will be updated automatically via Firestore listener
@@ -1764,7 +1762,10 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
   };
 
   const handleOpenColumnTypesForSource = async (sourceId: string) => {
-    if (!agentId) return;
+    if (!agentId || !teamId) {
+      toast.error("Team ID is required");
+      return;
+    }
 
     try {
       const user = auth.currentUser;
@@ -3224,82 +3225,82 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
 
               return (
                 <tr key={source.id} className="border-b last:border-b-0">
-                <td className="py-3 px-4">
-                  <div className="flex items-center">
-                    {source.type === "slack_channel" ? (
-                      <button
-                        type="button"
-                        onClick={() => openSlackTranscript(source)}
-                        className="p-1 rounded hover:bg-accent transition-colors"
-                        title="View Slack transcript"
-                        aria-label="View Slack transcript"
-                      >
-                        {getFileTypeIcon(source)}
-                      </button>
-                    ) : (
-                      getFileTypeIcon(source)
-                    )}
-                  </div>
-                </td>
-                <td className="py-3 px-4">
-                  <div className="flex items-center gap-2">
-                    {isAtlassianSource ? (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-block">
-                              {nicknameInput}
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            Atlassian artefacts are auto-assigned nicknames
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    ) : (
-                      nicknameInput
-                    )}
-                    {editingSourceId === source.id && (
-                      <button
-                        onClick={() => handleNicknameSave(source.id)}
-                        className="text-primary hover:text-primary/80 transition-colors"
-                        title="Save nickname"
-                      >
-                        <Check className="h-4 w-4" />
-                      </button>
-                    )}
-                    {/* Show alert icon for table sources without column metadata */}
-                    {source.type === "table" && !source.columnMetadata && (
-                      <button
-                        onClick={() =>
-                          handleOpenColumnTypesForSource(source.id)
-                        }
-                        className="text-destructive hover:text-destructive/80 transition-colors"
-                        title="Column metadata missing - click to configure"
-                      >
-                        <CiCircleAlert className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                </td>
-                <td className="py-3 px-4">
-                  <Input
-                    value={source.description || ""}
-                    readOnly
-                    onClick={() => handleDescriptionClick(source.id)}
-                    placeholder="-"
-                    className="h-8 text-sm cursor-pointer"
-                  />
-                </td>
-                <td className="py-3 px-4">
-                  <button
-                    onClick={() => handleDeleteClick(source.id)}
-                    className="text-destructive hover:text-destructive/80 transition-colors"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </td>
-              </tr>
+                  <td className="py-3 px-4">
+                    <div className="flex items-center">
+                      {source.type === "slack_channel" ? (
+                        <button
+                          type="button"
+                          onClick={() => openSlackTranscript(source)}
+                          className="p-1 rounded hover:bg-accent transition-colors"
+                          title="View Slack transcript"
+                          aria-label="View Slack transcript"
+                        >
+                          {getFileTypeIcon(source)}
+                        </button>
+                      ) : (
+                        getFileTypeIcon(source)
+                      )}
+                    </div>
+                  </td>
+                  <td className="py-3 px-4">
+                    <div className="flex items-center gap-2">
+                      {isAtlassianSource ? (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="inline-block">
+                                {nicknameInput}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              Atlassian artefacts are auto-assigned nicknames
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      ) : (
+                        nicknameInput
+                      )}
+                      {editingSourceId === source.id && (
+                        <button
+                          onClick={() => handleNicknameSave(source.id)}
+                          className="text-primary hover:text-primary/80 transition-colors"
+                          title="Save nickname"
+                        >
+                          <Check className="h-4 w-4" />
+                        </button>
+                      )}
+                      {/* Show alert icon for table sources without column metadata */}
+                      {source.type === "table" && !source.columnMetadata && (
+                        <button
+                          onClick={() =>
+                            handleOpenColumnTypesForSource(source.id)
+                          }
+                          className="text-destructive hover:text-destructive/80 transition-colors"
+                          title="Column metadata missing - click to configure"
+                        >
+                          <CiCircleAlert className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                  <td className="py-3 px-4">
+                    <Input
+                      value={source.description || ""}
+                      readOnly
+                      onClick={() => handleDescriptionClick(source.id)}
+                      placeholder="-"
+                      className="h-8 text-sm cursor-pointer"
+                    />
+                  </td>
+                  <td className="py-3 px-4">
+                    <button
+                      onClick={() => handleDeleteClick(source.id)}
+                      className="text-destructive hover:text-destructive/80 transition-colors"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </td>
+                </tr>
               );
             })}
           </tbody>

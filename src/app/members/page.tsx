@@ -95,7 +95,7 @@ export default function MembersPage() {
   const [isInvitingMembers, setIsInvitingMembers] = useState(false);
   const [inviteButtonLabel, setInviteButtonLabel] = useState("Invite");
   const [teamNameForInvite, setTeamNameForInvite] = useState<string | null>(
-    null
+    null,
   );
   const [creatorFirstName, setCreatorFirstName] = useState<string | null>(null);
 
@@ -168,7 +168,7 @@ export default function MembersPage() {
 
       try {
         const roleSnap = await getDoc(
-          doc(db, "teams", teamId, "users", currentUserId)
+          doc(db, "teams", teamId, "users", currentUserId),
         );
         const nextRole = roleSnap.exists()
           ? (roleSnap.data().role as "admin" | "member" | undefined)
@@ -212,7 +212,7 @@ export default function MembersPage() {
 
   const handleRoleChange = async (
     memberId: string,
-    nextRole: "admin" | "member"
+    nextRole: "admin" | "member",
   ) => {
     if (currentUserRole !== "admin") {
       toast.error("you dont have permission to make changes");
@@ -227,8 +227,8 @@ export default function MembersPage() {
 
     setMembers((prev) =>
       prev.map((member) =>
-        member.uid === memberId ? { ...member, role: nextRole } : member
-      )
+        member.uid === memberId ? { ...member, role: nextRole } : member,
+      ),
     );
 
     try {
@@ -242,15 +242,15 @@ export default function MembersPage() {
       toast.error("Failed to update role.");
       setMembers((prev) =>
         prev.map((member) =>
-          member.uid === memberId ? { ...member, role: previousRole } : member
-        )
+          member.uid === memberId ? { ...member, role: previousRole } : member,
+        ),
       );
     }
   };
 
   const handleAgentRoleChange = async (
     agentId: string,
-    nextRole: "edit" | "view" | "admin"
+    nextRole: "edit" | "view" | "admin",
   ) => {
     if (!isAdmin) {
       toast.error("you dont have permission to make changes");
@@ -265,8 +265,8 @@ export default function MembersPage() {
     }
 
     const previousRole =
-      selectedMember.agents?.find((agent) => agent.agent_id === agentId)?.role ??
-      "view";
+      selectedMember.agents?.find((agent) => agent.agent_id === agentId)
+        ?.role ?? "view";
     const agentName =
       selectedMember.agents?.find((agent) => agent.agent_id === agentId)
         ?.agent_name ?? "";
@@ -278,11 +278,11 @@ export default function MembersPage() {
             ? {
                 ...member,
                 agents: member.agents?.map((agent) =>
-                  agent.agent_id === agentId ? { ...agent, role } : agent
+                  agent.agent_id === agentId ? { ...agent, role } : agent,
                 ),
               }
-            : member
-        )
+            : member,
+        ),
       );
 
       setSelectedMember((prev) =>
@@ -290,10 +290,10 @@ export default function MembersPage() {
           ? {
               ...prev,
               agents: prev.agents?.map((agent) =>
-                agent.agent_id === agentId ? { ...agent, role } : agent
+                agent.agent_id === agentId ? { ...agent, role } : agent,
               ),
             }
-          : prev
+          : prev,
       );
     };
 
@@ -336,7 +336,7 @@ export default function MembersPage() {
       const response = await removeAgentMember(
         teamId,
         pendingRemoval.agentId,
-        pendingRemoval.memberId
+        pendingRemoval.memberId,
       );
 
       if (!response.success) {
@@ -349,11 +349,11 @@ export default function MembersPage() {
             ? {
                 ...member,
                 agents: member.agents?.filter(
-                  (agent) => agent.agent_id !== pendingRemoval.agentId
+                  (agent) => agent.agent_id !== pendingRemoval.agentId,
                 ),
               }
-            : member
-        )
+            : member,
+        ),
       );
 
       setSelectedMember((prev) =>
@@ -361,10 +361,10 @@ export default function MembersPage() {
           ? {
               ...prev,
               agents: prev.agents?.filter(
-                (agent) => agent.agent_id !== pendingRemoval.agentId
+                (agent) => agent.agent_id !== pendingRemoval.agentId,
               ),
             }
-          : prev
+          : prev,
       );
 
       toast.success("Member removed from agent.");
@@ -405,7 +405,7 @@ export default function MembersPage() {
         try {
           const creatorResponse = await getCreatorFirstName(
             teamId,
-            currentUserId
+            currentUserId,
           );
           if (creatorResponse.ok && creatorResponse.creator_first_name) {
             setCreatorFirstName(creatorResponse.creator_first_name);
@@ -479,7 +479,11 @@ export default function MembersPage() {
 
     try {
       setIsInvitingMembers(true);
-      const response = await inviteTeamMembers(teamId, emailList, currentUserId);
+      const response = await inviteTeamMembers(
+        teamId,
+        emailList,
+        currentUserId,
+      );
       if (response.ok) {
         setInviteButtonLabel("Done");
         toast.success("Invitations sent!");
@@ -527,13 +531,19 @@ export default function MembersPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={4} className="text-sm text-muted-foreground">
+                <TableCell
+                  colSpan={4}
+                  className="text-sm text-muted-foreground"
+                >
                   Loading members...
                 </TableCell>
               </TableRow>
             ) : filteredMembers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="text-sm text-muted-foreground">
+                <TableCell
+                  colSpan={4}
+                  className="text-sm text-muted-foreground"
+                >
                   No members found.
                 </TableCell>
               </TableRow>
@@ -552,7 +562,10 @@ export default function MembersPage() {
                     <Select
                       value={member.role ?? "member"}
                       onValueChange={(value) =>
-                        handleRoleChange(member.uid, value as "admin" | "member")
+                        handleRoleChange(
+                          member.uid,
+                          value as "admin" | "member",
+                        )
                       }
                       disabled={!isAdmin}
                     >
@@ -622,17 +635,17 @@ export default function MembersPage() {
                         ? handleRemoveRequest(agent)
                         : handleAgentRoleChange(
                             agent.agent_id,
-                            value as "edit" | "view" | "admin"
+                            value as "edit" | "view" | "admin",
                           )
                     }
                     disabled={!isAdmin}
                   >
                     <SelectTrigger className="w-[120px]">
-    <SelectValue placeholder="Role" />
-  </SelectTrigger>
-  <SelectContent>
-    <SelectItem value="view">view</SelectItem>
-    <SelectItem value="edit">edit</SelectItem>
+                      <SelectValue placeholder="Role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="view">view</SelectItem>
+                      <SelectItem value="edit">edit</SelectItem>
                       <SelectItem value="admin">admin</SelectItem>
                       <SelectItem
                         value="remove"
@@ -641,8 +654,8 @@ export default function MembersPage() {
                       >
                         remove
                       </SelectItem>
-  </SelectContent>
-</Select>
+                    </SelectContent>
+                  </Select>
                 </div>
               ))
             ) : (
@@ -688,7 +701,7 @@ export default function MembersPage() {
         >
           <AlertDialogHeader>
             <AlertDialogTitle className="text-2xl font-bold">
-              Invite members to  {memberTeamLabel}'s Solari team{" "}
+              Invite members to {memberTeamLabel}'s Solari team{" "}
             </AlertDialogTitle>
             <AlertDialogDescription>
               Here’s a 6 digit code you can send them to let them join this team

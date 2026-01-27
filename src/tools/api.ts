@@ -13,7 +13,7 @@
 export async function uploadDocumentToPinecone(
   namespace: string,
   filePath: string,
-  nickname: string
+  nickname: string,
 ): Promise<void> {
   try {
     const apiUrl = `/api/pinecone_doc_upload`;
@@ -52,7 +52,7 @@ export async function uploadDocumentToPinecone(
 export async function uploadWebsiteToPinecone(
   namespace: string,
   url: string,
-  nickname: string
+  nickname: string,
 ): Promise<void> {
   try {
     const apiUrl = `/api/pinecone_website_upload`;
@@ -89,7 +89,7 @@ export async function uploadWebsiteToPinecone(
  */
 export async function createTeamInviteCode(
   uid: string,
-  teamId: string
+  teamId: string,
 ): Promise<{ invite_code: string; ok: boolean; team_id: string }> {
   try {
     const apiUrl = `/api/teams/create_invite_code`;
@@ -129,7 +129,7 @@ export async function createTeamInviteCode(
  */
 export async function getCreatorFirstName(
   teamId: string,
-  userId: string
+  userId: string,
 ): Promise<{
   ok: boolean;
   creator_first_name?: string;
@@ -173,7 +173,7 @@ export async function getCreatorFirstName(
  * @returns Promise that resolves with the team id response
  */
 export async function joinTeamInviteCode(
-  inviteCode: string
+  inviteCode: string,
 ): Promise<{ ok: boolean; invite_code: string; team_id: string }> {
   try {
     const apiUrl = `/api/team/join_team_invite_code`;
@@ -213,7 +213,7 @@ export async function joinTeamInviteCode(
 export async function inviteTeamMembers(
   teamId: string,
   emails: string[],
-  userId: string
+  userId: string,
 ): Promise<{
   ok: boolean;
   status?: string;
@@ -264,7 +264,7 @@ export async function inviteTeamMembers(
  */
 export async function listTeamMembers(
   teamId: string,
-  userId: string
+  userId: string,
 ): Promise<{
   ok: boolean;
   members: Array<{
@@ -325,7 +325,7 @@ export async function listTeamMembers(
  */
 export async function listAgentMembers(
   teamId: string,
-  agentId: string
+  agentId: string,
 ): Promise<{
   success: boolean;
   members: Array<{
@@ -391,7 +391,7 @@ export async function addAgentMembers(
   teamId: string,
   agentId: string,
   agentName: string,
-  members: Array<{ email: string; permission: string }>
+  members: Array<{ email: string; permission: string }>,
 ): Promise<{
   success: boolean;
   added?: Array<{
@@ -460,7 +460,7 @@ export async function addAgentMembers(
 export async function removeAgentMember(
   teamId: string,
   agentId: string,
-  userId: string
+  userId: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const apiUrl = `/api/agent/remove_members`;
@@ -506,7 +506,7 @@ export async function removeAgentMember(
 export async function updateTeamMemberRole(
   teamId: string,
   userId: string,
-  role: "admin" | "member"
+  role: "admin" | "member",
 ): Promise<{
   ok: boolean;
   role?: "admin" | "member";
@@ -563,7 +563,7 @@ export async function analyzeTable(
   userId: string,
   teamId: string,
   agentId: string,
-  documentId: string
+  documentId: string,
 ): Promise<{
   column_count: number;
   columns: Record<
@@ -665,7 +665,7 @@ export async function askPinecone(
   agentId: string,
   nickname?: string,
   requestId?: string,
-  modelProvider?: string
+  modelProvider?: string,
 ): Promise<AskPineconeResponse> {
   try {
     const apiUrl = `/api/handle-rag-message`;
@@ -727,7 +727,7 @@ export async function confirmSource(
   agentId: string,
   requestId?: string,
   sourceSuggestion?: string,
-  modelProvider?: string
+  modelProvider?: string,
 ): Promise<AskPineconeResponse> {
   try {
     const apiUrl = `/api/source-confirmed`;
@@ -790,7 +790,7 @@ export async function startSlackBatchSync(
     nickname: string;
   }>,
   chunkN = 20,
-  overlapN = 5
+  overlapN = 5,
 ): Promise<{
   batch_id: string;
   next: {
@@ -844,7 +844,7 @@ export async function startSlackBatchSync(
 export async function getSlackBatchSyncStatus(
   userId: string,
   agentId: string,
-  batchId: string
+  batchId: string,
 ): Promise<any> {
   try {
     const apiUrl = `/api/pinecone_slack_upload_batch/status?uid=${userId}&agent_id=${agentId}&batch_id=${encodeURIComponent(batchId)}`;
@@ -880,7 +880,7 @@ export async function getSlackBatchSyncStatus(
 export async function tickSlackBatchSync(
   userId: string,
   agentId: string,
-  batchId: string
+  batchId: string,
 ): Promise<any> {
   try {
     const apiUrl = `/api/pinecone_slack_upload_batch/tick?uid=${userId}&agent_id=${agentId}&batch_id=${encodeURIComponent(batchId)}`;
@@ -927,7 +927,7 @@ export async function tickSlackBatchSync(
 export async function updateAgentModelProvider(
   userId: string,
   agentId: string,
-  modelProvider: string
+  modelProvider: string,
 ): Promise<{ success?: boolean; ok?: boolean; error?: string }> {
   try {
     const apiUrl = `/api/agent/update_model`;
