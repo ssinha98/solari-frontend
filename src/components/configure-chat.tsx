@@ -3016,9 +3016,8 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
         if (hasBotToken) {
           setIsLoadingSlackChannels(true);
           try {
-            const backendUrl = getBackendUrl();
             const response = await fetch(
-              `${backendUrl}/api/slack/list_channels?uid=${user.uid}`,
+              `/api/slack/list_channels?uid=${encodeURIComponent(user.uid)}`,
             );
 
             if (!response.ok) {

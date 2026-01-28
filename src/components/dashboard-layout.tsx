@@ -226,10 +226,15 @@ function DashboardHeader() {
   };
 
   const handleHeaderAction = (action: "documentation" | "help") => {
-    // Placeholder for page-specific behavior
-    console.log("[DashboardHeader]", action, "clicked on", pathname, {
-      editMode: isEditMode,
-    });
+    if (action === "documentation") {
+      window.open("https://docs.usesolari.ai/", "_blank", "noopener,noreferrer");
+      return;
+    }
+    window.open(
+      "https://cal.com/sahil-sinha-hugr4z/30min",
+      "_blank",
+      "noopener,noreferrer",
+    );
   };
 
   return (
