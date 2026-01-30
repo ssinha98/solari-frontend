@@ -29,12 +29,7 @@ export async function POST(req: Request) {
     console.error("Error in API route:", error);
     return new NextResponse(
       JSON.stringify({ error: "Internal server error" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }
 }
-
-
-
-
-

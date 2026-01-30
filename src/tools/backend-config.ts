@@ -5,7 +5,7 @@
 
 // Switch between "test" and "prod" to change the backend URL
 // Change this value to switch environments
-const ENVIRONMENT = "test" as "test" | "prod";
+const ENVIRONMENT = "prod" as "test" | "prod";
 
 export const getBackendUrl = (): string => {
   // Use environment variable if set, otherwise use the ENVIRONMENT constant
