@@ -171,6 +171,37 @@ export async function getCreatorFirstName(
 }
 
 /**
+ * Sends a welcome email to a user via the backend API
+ * @param userId - The user ID
+ * @returns Promise that resolves with the success response
+ */
+export async function sendWelcomeEmail(
+  userId: string,
+): Promise<{ success: boolean }> {
+  try {
+    const apiUrl = `/api/user/send_welcome_email`;
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ userId }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Backend API error:", errorText);
+      throw new Error(`Backend API error: ${response.status} ${errorText}`);
+    }
+
+    return (await response.json()) as { success: boolean };
+  } catch (error) {
+    console.error("Error calling send welcome email API:", error);
+    throw error;
+  }
+}
+
+/**
  * Resolves an invite code to a team id via the backend API
  * @param inviteCode - The invite code to resolve
  * @returns Promise that resolves with the team id response

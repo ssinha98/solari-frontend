@@ -40,7 +40,11 @@ import {
   InputOTPSeparator,
   InputOTPSlot,
 } from "@/components/ui/input-otp";
-import { getCreatorFirstName, inviteTeamMembers } from "@/tools/api";
+import {
+  getCreatorFirstName,
+  inviteTeamMembers,
+  sendWelcomeEmail,
+} from "@/tools/api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -415,6 +419,12 @@ export default function DashboardPage() {
         },
         { merge: true },
       );
+      const userId = auth.currentUser?.uid;
+      if (userId) {
+        void sendWelcomeEmail(userId).catch((error) => {
+          console.error("Failed to send welcome email:", error);
+        });
+      }
       setTeamNameSaved(true);
       setTeamDialogStep(2);
       setTeamDialogOpen(true);

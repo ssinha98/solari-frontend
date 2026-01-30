@@ -456,9 +456,16 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
           id: docSnap.id,
           ...(docSnap.data() as Omit<UploadJob, "id">),
         }));
-        const activeJobs = allJobs.filter((job) =>
-          activeStatuses.has(job.status ?? ""),
-        );
+        const activeJobs = allJobs.filter((job) => {
+          const statusValue = (
+            job.status ??
+            (job as { message?: string }).message ??
+            ""
+          )
+            .toString()
+            .toLowerCase();
+          return activeStatuses.has(statusValue);
+        });
         setUploadJobs(activeJobs);
         if (activeJobs.length === 0) {
           setIsUploadJobsDrawerOpen(false);
@@ -6416,20 +6423,28 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
               </p>
             ) : (
               uploadJobs.map((job) => {
-                const status = job.status ?? "unknown";
+                const statusLabel =
+                  job.status ??
+                  (job as { message?: string }).message ??
+                  "unknown";
+                const statusKey = statusLabel.toString().toLowerCase();
                 const statusVariant =
-                  status === "error"
+                  statusKey === "error"
                     ? "destructive"
-                    : status === "processing"
+                    : statusKey === "processing"
                       ? "secondary"
                       : "outline";
                 const isConfluence = job.connector === "confluence";
                 const isSlack = job.connector === "slack";
                 const isWebsite = job.connector === "website";
                 const isDoc = job.connector === "doc";
+                const isJira = job.connector === "jira";
                 const sourceRecord = (
                   job as { sources?: Array<Record<string, unknown>> }
                 ).sources?.[0] ?? null;
+                const jiraTicketCount = isJira
+                  ? (job as { sources?: Array<unknown> }).sources?.length ?? 0
+                  : 0;
                 const truncateText = (value?: string | null, max = 100) =>
                   value && value.length > max ? `${value.slice(0, max)}...` : value;
                 const confluenceUrl = isConfluence
@@ -6482,7 +6497,7 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
                     }}
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <Badge variant={statusVariant}>{status}</Badge>
+                      <Badge variant={statusVariant}>{statusLabel}</Badge>
                       {(confluenceUrl || (isWebsite && websiteTitle)) && (
                         <a
                           href={confluenceUrl || websiteTitle}
@@ -6559,8 +6574,8 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
                       <div className="mt-2 space-y-2">
                         <div className="flex items-center gap-2">
                           <CiGlobe className="h-4 w-4" />
-                          <p className="text-sm font-medium">
-                            {websiteTitle ?? "Website"}
+                          <p className="text-sm font-medium truncate max-w-[220px]">
+                            {truncateText(websiteTitle ?? "Website", 40)}
                           </p>
                         </div>
                         {websiteNickname && (
@@ -6588,6 +6603,22 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
                             {truncatedFilePath}
                           </p>
                         )}
+                      </div>
+                    )}
+                    {job.connector === "jira" && (
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Image
+                            src="https://img.icons8.com/?size=100&id=oROcPah5ues6&format=png&color=000000"
+                            alt="Jira"
+                            width={16}
+                            height={16}
+                            className="h-4 w-4"
+                          />
+                          <p className="text-sm font-medium">
+                            @jira[{jiraTicketCount}]
+                          </p>
+                        </div>
                       </div>
                     )}
                   </div>
