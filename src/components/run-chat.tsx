@@ -371,6 +371,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
   );
   const countdownTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const editorRef = useRef<any>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const getAgentEventProps = () => {
     const eventProps: Record<string, string> = {};
@@ -1043,6 +1044,10 @@ export function RunChat({ agentId }: { agentId: string | null }) {
     fetchAgentName();
   }, [agentId, teamId]);
 
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isLoadingResponse]);
+
   return (
     <div className="flex gap-4 h-[calc(100vh-12rem)]">
       {/* Left Box - Sources (Minimizable) */}
@@ -1151,12 +1156,14 @@ export function RunChat({ agentId }: { agentId: string | null }) {
                         msg.role === "assistant" &&
                         msg.pendingConfirmation
                       ) {
-        posthog?.capture("agent: source_corrected", {
-          ...getAgentEventProps(),
-          source_suggestion: msg.pendingConfirmation.sourceSuggestion,
-          chosen_nickname: msg.pendingConfirmation.chosenNickname,
-          query: msg.pendingConfirmation.query,
-        });
+                        posthog?.capture("agent: source_corrected", {
+                          ...getAgentEventProps(),
+                          source_suggestion:
+                            msg.pendingConfirmation.sourceSuggestion,
+                          chosen_nickname:
+                            msg.pendingConfirmation.chosenNickname,
+                          query: msg.pendingConfirmation.query,
+                        });
                         setPendingConfirmationMessageId(msg.id);
                         setSourceSelectionDialogOpen(true);
                         // Clear the countdown timer when dialog opens
@@ -1442,6 +1449,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
                   </div>
                 </div>
               )}
+              <div ref={messagesEndRef} />
             </>
           )}
         </div>

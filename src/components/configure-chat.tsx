@@ -10,6 +10,7 @@ import {
   Check,
   RefreshCw,
   Info,
+  ExternalLink,
 } from "lucide-react";
 import {
   getAgentSources,
@@ -45,6 +46,8 @@ import {
   getDocs,
   serverTimestamp,
   onSnapshot,
+  orderBy,
+  limit,
 } from "firebase/firestore";
 import { IoIosDocument } from "react-icons/io";
 import { CiGlobe, CiViewTable, CiCircleAlert } from "react-icons/ci";
@@ -111,6 +114,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
 // import { AnalyticsHBarChart } from "@/components/analytics_hbarchart";
 
 // Helper function to get file type icon based on type or file extension
@@ -286,6 +296,15 @@ function getSourceTypeIcon(type: string) {
   }
 }
 
+type UploadJob = {
+  id: string;
+  status?: string;
+  connector?: string;
+  title?: string;
+  url?: string;
+  excerpt?: string;
+};
+
 export function ConfigureChat({ agentId }: { agentId: string | null }) {
   const router = useRouter();
   const posthog = usePostHog();
@@ -367,6 +386,8 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
   const [agentName, setAgentName] = useState<string>("");
   const [slackTranscriptSource, setSlackTranscriptSource] =
     useState<Source | null>(null);
+  const [uploadJobs, setUploadJobs] = useState<UploadJob[]>([]);
+  const [isUploadJobsDrawerOpen, setIsUploadJobsDrawerOpen] = useState(false);
 
   const delay = (ms: number) =>
     new Promise((resolve) => setTimeout(resolve, ms));
@@ -412,6 +433,47 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
     };
 
     fetchTeamName();
+  }, [teamId]);
+
+  useEffect(() => {
+    if (!teamId) {
+      setUploadJobs([]);
+      setIsUploadJobsDrawerOpen(false);
+      return;
+    }
+
+    const jobsQuery = query(
+      collection(db, "teams", teamId, "upload_jobs"),
+      orderBy("created_at", "desc"),
+      limit(25),
+    );
+
+    const activeStatuses = new Set(["queued", "processing", "error"]);
+    const unsubscribe = onSnapshot(
+      jobsQuery,
+      (snapshot) => {
+        const allJobs = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...(docSnap.data() as Omit<UploadJob, "id">),
+        }));
+        const activeJobs = allJobs.filter((job) =>
+          activeStatuses.has(job.status ?? ""),
+        );
+        setUploadJobs(activeJobs);
+        if (activeJobs.length === 0) {
+          setIsUploadJobsDrawerOpen(false);
+        }
+      },
+      (error) => {
+        console.error("Error listening to upload jobs:", error);
+        setUploadJobs([]);
+        setIsUploadJobsDrawerOpen(false);
+      },
+    );
+
+    return () => {
+      unsubscribe();
+    };
   }, [teamId]);
 
   const getAgentEventProps = () => {
@@ -1306,56 +1368,21 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
       // Sources will be updated automatically via Firestore listener
       // Close the dialog and reset form
       closeAddNewSourceDialog();
-      toast.success("Website source added successfully");
 
-      // Upload website to Pinecone (non-blocking)
+      // Upload website URLs (non-blocking)
       const user = auth.currentUser;
-      if (user) {
-        try {
-          const userRef = doc(db, "users", user.uid);
-          const userSnap = await getDoc(userRef);
-
-          if (userSnap.exists()) {
-            const userData = userSnap.data();
-            const teamId = userData.teamId as string | undefined;
-
-            if (!teamId) {
-              console.warn("teamId not found in user document");
-              return;
-            }
-
-            const teamRef = doc(db, "teams", teamId);
-            const teamSnap = await getDoc(teamRef);
-
-            if (!teamSnap.exists()) {
-              console.warn("team document not found");
-              return;
-            }
-
-            const teamData = teamSnap.data();
-            const namespace = teamData.pinecone_namespace;
-
-            if (namespace) {
-              uploadWebsiteToPinecone(
-                namespace,
-                websiteUrl.trim(),
-                websiteNickname.trim(),
-              ).catch((error) => {
-                console.error(
-                  "Failed to upload website to Pinecone (non-blocking):",
-                  error,
-                );
-              });
-            } else {
-              console.warn("pinecone_namespace not found in team document");
-            }
-          }
-        } catch (error) {
+      if (user && agentId) {
+        uploadWebsiteToPinecone(user.uid, agentId, [
+          {
+            url: websiteUrl.trim(),
+            nickname: websiteNickname.trim(),
+          },
+        ]).catch((error) => {
           console.error(
-            "Error fetching user namespace for Pinecone upload:",
+            "Failed to upload website URLs (non-blocking):",
             error,
           );
-        }
+        });
       }
     } catch (error) {
       console.error("Failed to add website source:", error);
@@ -1486,6 +1513,8 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
       const filePath = await uploadSourceFile(
         selectedFile,
         documentNickname.trim(),
+        undefined,
+        agentId,
       );
 
       // Add source with file path
@@ -1504,7 +1533,6 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
       // Sources will be updated automatically via Firestore listener
       // Close the dialog and reset form
       closeAddNewSourceDialog();
-      toast.success("Document source added successfully");
     } catch (error) {
       console.error("Failed to add document source:", error);
       toast.error("Failed to add document source");
@@ -1590,6 +1618,7 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
         csvFile,
         tableNickname.trim(),
         "table",
+        agentId,
       );
 
       // Add source with file path - capture the document ID
@@ -1683,7 +1712,6 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
       // Sources will be updated automatically via Firestore listener
       // Close the dialog and reset form
       closeAddNewSourceDialog();
-      toast.success("Table source added successfully");
     } catch (error) {
       console.error("Failed to add table source:", error);
       toast.error("Failed to add table source");
@@ -1835,7 +1863,6 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
       // Only close the "add new source" dialog if it's open (i.e., we're adding a new source)
       if (addNewSourceDialogOpen) {
         closeAddNewSourceDialog();
-        toast.success("Table source added successfully");
       } else {
         // We're updating an existing source
         toast.success("Column metadata saved successfully");
@@ -2035,9 +2062,6 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
       setJiraSearchResults([]);
       setJiraSearchInput("");
 
-      toast.success(
-        `Successfully added ${selectedTickets.length} Jira ticket(s)`,
-      );
     } catch (error) {
       console.error("Failed to add Jira tickets:", error);
       toast.error("Failed to add Jira tickets");
@@ -2235,14 +2259,27 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
           page.tinyui_path ||
           page._links?.tinyui ||
           page.content?._links?.tinyui;
-        const url = buildConfluenceUrl(tinyuiPath);
+        const rawUrl = page.url || page._links?.webui || page.content?._links?.webui;
+        const resolvedUrl =
+          typeof rawUrl === "string" && rawUrl.startsWith("http")
+            ? rawUrl
+            : typeof rawUrl === "string" && jiraSiteUrl
+              ? `${jiraSiteUrl}/wiki${rawUrl.startsWith("/") ? rawUrl : `/${rawUrl}`}`
+              : buildConfluenceUrl(tinyuiPath) || undefined;
+        const excerpt = typeof page.excerpt === "string" ? page.excerpt : undefined;
         return {
           id: page.id,
           title: page.title,
-          tinyui_path: tinyuiPath || null,
-          excerpt: page.excerpt || null,
-          url,
+          tinyui_path: tinyuiPath || undefined,
+          excerpt,
+          url: resolvedUrl,
         };
+      });
+
+      console.log("Confluence add_pages payload:", {
+        user_id: user.uid,
+        agent_id: agentId,
+        pages: pagesPayload,
       });
 
       const response = await fetch("/api/confluence/add_pages", {
@@ -2278,9 +2315,6 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
       setConfluenceSearchInput("");
       setConfluenceCQLInput("");
 
-      toast.success(
-        `Successfully added ${data.pages_added ?? selectedPages.length} Confluence page(s)`,
-      );
     } catch (error) {
       console.error("Failed to add Confluence pages:", error);
       toast.error(
@@ -2383,9 +2417,23 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
     setSyncingChannels((prev) => new Set(prev).add(channelId));
 
     try {
-      const response = await fetch(
-        `/api/slack/sync_channel?uid=${user.uid}&channel_id=${channelId}&agent_id=${agentId}&channel_name=${encodeURIComponent(channelName)}`,
-      );
+      const response = await fetch("/api/slack/add_channels", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          uid: user.uid,
+          agent_id: agentId,
+          channels: [
+            {
+              channel_id: channelId,
+              channel_name: channelName,
+              nickname: channelName,
+            },
+          ],
+        }),
+      });
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -2393,11 +2441,13 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
       }
 
       const data = await response.json();
-      if (data.ok) {
-        toast.success("Channel synced successfully");
+      if (data?.ok === false) {
+        throw new Error(data.error || "Sync failed");
+      }
+      if (data.ok || data.status === "success" || data.success) {
         // Sources will be updated automatically via Firestore listener
       } else {
-        throw new Error("Sync failed");
+        throw new Error(data?.error || "Sync failed");
       }
     } catch (error) {
       console.error("Error syncing Slack channel:", error);
@@ -2460,7 +2510,7 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
 
       const data = await response.json();
       if (data.ok) {
-        toast.success("Channel synced successfully");
+        // Sources will be updated automatically via Firestore listener
       } else {
         throw new Error("Sync failed");
       }
@@ -2542,17 +2592,6 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
         throw new Error("Team ID not found");
       }
 
-      const teamRef = doc(db, "teams", teamId);
-      const teamSnap = await getDoc(teamRef);
-      if (!teamSnap.exists()) {
-        throw new Error("Team not found");
-      }
-      const teamData = teamSnap.data();
-      const namespace = teamData.pinecone_namespace as string | undefined;
-      if (!namespace) {
-        throw new Error("pinecone_namespace not found");
-      }
-
       // Map channels to the format required by the API
       const channelsForApi = selectedChannels.map((channel) => ({
         channel_id: channel.id,
@@ -2560,51 +2599,47 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
         nickname: channel.name,
       }));
 
-      const chunkN = 20;
-      const overlapN = 5;
-
-      // Call the batch sync start endpoint
+      // Call the add channels endpoint
       const response = await startSlackBatchSync(
         user.uid,
         agentId,
-        namespace,
         channelsForApi,
-        chunkN,
-        overlapN,
       );
 
-      // Store batch_id in state
-      setBatchId(response.batch_id);
+      if (response?.batch_id) {
+        // Store batch_id in state
+        setBatchId(response.batch_id);
 
-      // Optimistically add channels to batchQueueItems immediately
-      // This ensures the UI updates right away, before Firestore listener picks it up
-      const optimisticQueueItems = selectedChannels.map((channel) => ({
-        channel_id: channel.id,
-        channel_name: channel.name,
-        status: "queued",
-        team_id: slackTeamIdFromInstall!,
-        batch_id: response.batch_id,
-      }));
+        // Optimistically add channels to batchQueueItems immediately
+        // This ensures the UI updates right away, before Firestore listener picks it up
+        const optimisticQueueItems = selectedChannels.map((channel) => ({
+          channel_id: channel.id,
+          channel_name: channel.name,
+          status: "queued",
+          team_id: slackTeamIdFromInstall!,
+          batch_id: response.batch_id,
+        }));
 
-      setBatchQueueItems((prev) => {
-        // Combine with existing items, avoiding duplicates
-        const existingChannelIds = new Set(prev.map((item) => item.channel_id));
-        const newItems = optimisticQueueItems.filter(
-          (item) => !existingChannelIds.has(item.channel_id),
-        );
-        return [...prev, ...newItems];
-      });
+        setBatchQueueItems((prev) => {
+          // Combine with existing items, avoiding duplicates
+          const existingChannelIds = new Set(
+            prev.map((item) => item.channel_id),
+          );
+          const newItems = optimisticQueueItems.filter(
+            (item) => !existingChannelIds.has(item.channel_id),
+          );
+          return [...prev, ...newItems];
+        });
+      }
 
       posthog?.capture("agent:add_source_slack", getAgentEventProps());
 
-      toast.success(
-        `Started batch sync for ${selectedChannels.length} Slack channel(s)`,
-      );
+      // Sources will be updated automatically via Firestore listener
       // Close the dialog after starting the batch sync
       closeAddNewSourceDialog();
     } catch (error) {
-      console.error("Failed to start Slack batch sync:", error);
-      toast.error("Failed to start Slack batch sync");
+      console.error("Failed to add Slack channels:", error);
+      toast.error("Failed to add Slack channels");
     } finally {
       setIsStartingBatch(false);
       setIsAddSourcePreparing(false);
@@ -3121,84 +3156,15 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
   // Ref to track the polling interval
   const batchPollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Set up interval to poll status and tick endpoints when batchId is set (page-level, not dialog-dependent)
+  // Temporarily disable status/tick polling.
   useEffect(() => {
-    if (!batchId || !agentId) {
-      return;
-    }
-
-    const user = auth.currentUser;
-    if (!user) {
-      return;
-    }
-
-    const pollBatchStatus = async () => {
-      console.log("=== Polling batch status ===");
-      console.log("Batch ID:", batchId);
-      console.log("Agent ID:", agentId);
-      try {
-        // Check status first
-        const statusResponse = await getSlackBatchSyncStatus(
-          user.uid,
-          agentId,
-          batchId,
-        );
-        console.log("Status response:", statusResponse);
-
-        // Check if status is 'done' - if so, stop the interval and clear batchId
-        if (statusResponse.status === "done") {
-          console.log("Batch status is 'done', stopping interval");
-          if (batchPollIntervalRef.current) {
-            clearInterval(batchPollIntervalRef.current);
-            batchPollIntervalRef.current = null;
-          }
-          setBatchId(null); // Clear batchId from state
-          return; // Exit early, don't call tick
-        }
-
-        // Only call tick if batch is still running
-        console.log(
-          "Batch status:",
-          statusResponse.status,
-          "- calling tick endpoint",
-        );
-        const tickResponse = await tickSlackBatchSync(
-          user.uid,
-          agentId,
-          batchId,
-        );
-        console.log("Tick response:", tickResponse);
-        if (
-          tickResponse?.status === "done" ||
-          tickResponse?.error === "batch_not_running"
-        ) {
-          console.log("Batch no longer running, stopping interval");
-          if (batchPollIntervalRef.current) {
-            clearInterval(batchPollIntervalRef.current);
-            batchPollIntervalRef.current = null;
-          }
-          setBatchId(null);
-          return;
-        }
-      } catch (error) {
-        console.error("Error polling batch status:", error);
-        // Continue polling even on error
-      }
-      console.log("============================");
-    };
-
-    // Start the interval (call immediately, then every 3 seconds)
-    pollBatchStatus();
-    batchPollIntervalRef.current = setInterval(pollBatchStatus, 3000);
-
-    // Cleanup: clear interval when batchId changes or component unmounts
     return () => {
       if (batchPollIntervalRef.current) {
         clearInterval(batchPollIntervalRef.current);
         batchPollIntervalRef.current = null;
       }
     };
-  }, [batchId, agentId]);
+  }, []);
 
   // Fetch Slack team ID at page level for the widget
   useEffect(() => {
@@ -6422,6 +6388,215 @@ export function ConfigureChat({ agentId }: { agentId: string | null }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {uploadJobs.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-40">
+          <Button onClick={() => setIsUploadJobsDrawerOpen(true)}>
+            <span className="mr-2">Show upload jobs</span>
+            <Badge variant="secondary">{uploadJobs.length}</Badge>
+          </Button>
+        </div>
+      )}
+
+      <Sheet
+        open={isUploadJobsDrawerOpen}
+        onOpenChange={setIsUploadJobsDrawerOpen}
+      >
+        <SheetContent side="right">
+          <SheetHeader>
+            <SheetTitle>Upload jobs</SheetTitle>
+            <SheetDescription>
+              Active uploads for your team.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-3">
+            {uploadJobs.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No active upload jobs right now.
+              </p>
+            ) : (
+              uploadJobs.map((job) => {
+                const status = job.status ?? "unknown";
+                const statusVariant =
+                  status === "error"
+                    ? "destructive"
+                    : status === "processing"
+                      ? "secondary"
+                      : "outline";
+                const isConfluence = job.connector === "confluence";
+                const isSlack = job.connector === "slack";
+                const isWebsite = job.connector === "website";
+                const isDoc = job.connector === "doc";
+                const sourceRecord = (
+                  job as { sources?: Array<Record<string, unknown>> }
+                ).sources?.[0] ?? null;
+                const truncateText = (value?: string | null, max = 100) =>
+                  value && value.length > max ? `${value.slice(0, max)}...` : value;
+                const confluenceUrl = isConfluence
+                  ? (sourceRecord as { url?: string })?.url || job.url
+                  : undefined;
+                const confluenceTitle = isConfluence
+                  ? (sourceRecord as { title?: string })?.title ||
+                    job.title ||
+                    (job as { page?: { title?: string } }).page?.title ||
+                    (job as { page_title?: string }).page_title ||
+                    (job as { source_title?: string }).source_title
+                  : undefined;
+                const confluenceExcerpt = isConfluence
+                  ? (sourceRecord as { excerpt?: string })?.excerpt ||
+                    job.excerpt
+                  : undefined;
+                const truncatedExcerpt = truncateText(confluenceExcerpt, 100);
+                const websiteTitle = isWebsite
+                  ? (sourceRecord as { title?: string })?.title ||
+                    job.title ||
+                    (job as { url?: string }).url
+                  : undefined;
+                const websiteNickname = isWebsite
+                  ? (sourceRecord as { nickname?: string })?.nickname ||
+                    (job as { nickname?: string }).nickname
+                  : undefined;
+                const docNickname = isDoc
+                  ? (sourceRecord as { nickname?: string })?.nickname ||
+                    (job as { nickname?: string }).nickname
+                  : undefined;
+                const docFilePath = isDoc
+                  ? (sourceRecord as { file_path?: string })?.file_path ||
+                    (sourceRecord as { filePath?: string })?.filePath ||
+                    (job as { file_path?: string }).file_path ||
+                    (job as { filePath?: string }).filePath ||
+                    (job as { title?: string }).title
+                  : undefined;
+                const trimmedFilePath = docFilePath
+                  ? docFilePath.split("/files/")[1] || docFilePath
+                  : undefined;
+                const truncatedFilePath = truncateText(trimmedFilePath, 60);
+                return (
+                  <div
+                    key={job.id}
+                    className="rounded-lg border bg-background p-3"
+                    onClick={() => {
+                      if (isWebsite && websiteTitle) {
+                        window.open(websiteTitle, "_blank", "noopener,noreferrer");
+                      }
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <Badge variant={statusVariant}>{status}</Badge>
+                      {(confluenceUrl || (isWebsite && websiteTitle)) && (
+                        <a
+                          href={confluenceUrl || websiteTitle}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-muted-foreground hover:text-foreground"
+                          aria-label="Open link in new tab"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                      )}
+                    </div>
+                    {job.connector === "confluence" && (
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Image
+                            src="https://img.icons8.com/?size=100&id=h8EoAfgRDYLo&format=png&color=000000"
+                            alt="Confluence"
+                            width={16}
+                            height={16}
+                            className="h-4 w-4"
+                          />
+                          {confluenceUrl ? (
+                            <a
+                              href={confluenceUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-sm font-medium text-primary hover:underline"
+                            >
+                              {confluenceTitle ?? "Untitled page"}
+                            </a>
+                          ) : (
+                            <p className="text-sm font-medium">
+                              {confluenceTitle ?? "Untitled page"}
+                            </p>
+                          )}
+                        </div>
+                        {truncatedExcerpt && (
+                          <p className="text-xs text-muted-foreground">
+                            {truncatedExcerpt}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {job.connector === "slack" && (
+                      <div className="mt-2 space-y-2">
+                        {(() => {
+                          const channelName =
+                            (sourceRecord as { channel_name?: string })
+                              ?.channel_name ||
+                            (sourceRecord as { name?: string })?.name ||
+                            (job as { channel_name?: string }).channel_name ||
+                            job.title ||
+                            "Slack channel";
+                          return (
+                            <div className="flex items-center gap-2">
+                              <Image
+                                src="https://img.icons8.com/?size=100&id=4n94I13nDTyw&format=png&color=000000"
+                                alt="Slack"
+                                width={16}
+                                height={16}
+                                className="h-4 w-4"
+                              />
+                              <p className="text-sm font-medium">
+                                {channelName}
+                              </p>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+                    {job.connector === "website" && (
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <CiGlobe className="h-4 w-4" />
+                          <p className="text-sm font-medium">
+                            {websiteTitle ?? "Website"}
+                          </p>
+                        </div>
+                        {websiteNickname && (
+                          <p className="text-xs text-muted-foreground">
+                            <span className="italic">@{websiteNickname}</span>
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {job.connector === "doc" && (
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4" />
+                          <p className="text-sm font-medium">
+                            {docNickname ?? "Document"}
+                          </p>
+                        </div>
+                        {docNickname && (
+                          <p className="text-xs text-muted-foreground">
+                            <span className="italic">@{docNickname}</span>
+                          </p>
+                        )}
+                        {truncatedFilePath && (
+                          <p className="text-xs text-muted-foreground">
+                            {truncatedFilePath}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Slack Batch Sync Widget */}
       <SlackSyncWidget

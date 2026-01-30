@@ -4,34 +4,30 @@ import { getBackendUrl } from "@/tools/backend-config";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { user_id: userId, agent_id: agentId, pages } = body || {};
+    const { user_id, agent_id, sites } = body || {};
 
-    if (!userId || !agentId || !Array.isArray(pages)) {
+    if (!user_id || !agent_id || !Array.isArray(sites)) {
       return new NextResponse(
-        JSON.stringify({ error: "user_id, agent_id, and pages are required" }),
+        JSON.stringify({
+          error: "user_id, agent_id, and sites are required",
+          status: "failure",
+        }),
         { status: 400, headers: { "Content-Type": "application/json" } },
       );
     }
 
-    console.log("Confluence add_pages proxy payload:", body);
-
     const backendUrl = getBackendUrl();
-    console.log("Confluence add_pages backend url:", `${backendUrl}/api/confluence/add_pages`);
-    const backendRes = await fetch(`${backendUrl}/api/confluence/add_pages`, {
+    const backendRes = await fetch(`${backendUrl}/api/website/add_urls`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-solari-key": process.env.SOLARI_INTERNAL_KEY!,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ user_id, agent_id, sites }),
     });
 
     if (!backendRes.ok) {
       const errorText = await backendRes.text();
-      console.error("Confluence add_pages backend error:", {
-        status: backendRes.status,
-        body: errorText,
-      });
       return new NextResponse(errorText, {
         status: backendRes.status,
         headers: { "Content-Type": "application/json" },
@@ -41,9 +37,9 @@ export async function POST(req: Request) {
     const data = await backendRes.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error("Error in Confluence add pages API route:", error);
+    console.error("Error in website add URLs API route:", error);
     return new NextResponse(
-      JSON.stringify({ error: "Internal server error" }),
+      JSON.stringify({ error: "Internal server error", status: "failure" }),
       { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }

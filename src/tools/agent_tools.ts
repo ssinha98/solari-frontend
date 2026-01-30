@@ -360,6 +360,7 @@ export async function uploadSourceFile(
   file: File,
   nickname: string,
   sourceType?: string,
+  agentId?: string,
 ): Promise<string> {
   try {
     const user = auth.currentUser;
@@ -376,44 +377,15 @@ export async function uploadSourceFile(
     // Upload the file to Firebase Storage
     await uploadBytes(storageRef, file);
 
-    // Get the user document to fetch pinecone_namespace
-    const userRef = doc(db, "users", user.uid);
-    const userSnap = await getDoc(userRef);
-
-    if (!userSnap.exists()) {
-      throw new Error("User document not found");
-    }
-
-    const userData = userSnap.data();
-    const teamId = userData.teamId as string | undefined;
-
-    if (!teamId) {
-      console.warn("teamId not found in user document");
-      return storagePath;
-    }
-
-    const teamRef = doc(db, "teams", teamId);
-    const teamSnap = await getDoc(teamRef);
-
-    if (!teamSnap.exists()) {
-      console.warn("team document not found");
-      return storagePath;
-    }
-
-    const teamData = teamSnap.data();
-    const namespace = teamData.pinecone_namespace;
-
-    if (!namespace) {
-      console.warn("pinecone_namespace not found in team document");
-      // Still return the file path even if namespace is missing
-      return storagePath;
-    }
-
     // Call the backend API to process the file with Pinecone
     // Only do this if source type is not "table"
     // Don't block on this - if it fails, we still want to save to Firestore
     if (sourceType !== "table") {
-      uploadDocumentToPinecone(namespace, storagePath, nickname).catch(
+      if (!agentId) {
+        console.warn("agentId not provided for document upload");
+        return storagePath;
+      }
+      uploadDocumentToPinecone(user.uid, agentId, storagePath, nickname).catch(
         (error) => {
           console.error(
             "Failed to upload document to Pinecone (non-blocking):",

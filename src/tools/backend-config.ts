@@ -5,7 +5,7 @@
 
 // Switch between "test" and "prod" to change the backend URL
 // Change this value to switch environments
-const ENVIRONMENT = "prod" as "test" | "prod";
+const ENVIRONMENT = "test" as "test" | "prod";
 
 export const getBackendUrl = (): string => {
   // Use environment variable if set, otherwise use the ENVIRONMENT constant
@@ -14,7 +14,7 @@ export const getBackendUrl = (): string => {
     return envUrl;
   }
 
-  return ENVIRONMENT === "prod"
-    ? "https://api.usesolari.ai"
-    : "http://localhost:5000";
+  return ENVIRONMENT === "test"
+    ? "http://localhost:5000"
+    : "https://api.usesolari.ai";
 };

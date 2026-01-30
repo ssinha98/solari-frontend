@@ -5,13 +5,15 @@
 
 /**
  * Uploads a document to Pinecone via the backend API
- * @param namespace - The Pinecone namespace
+ * @param userId - The user ID
+ * @param agentId - The agent ID
  * @param filePath - The file path in Firebase Storage
  * @param nickname - The nickname for the document
  * @returns Promise that resolves when the upload is complete
  */
 export async function uploadDocumentToPinecone(
-  namespace: string,
+  userId: string,
+  agentId: string,
   filePath: string,
   nickname: string,
 ): Promise<void> {
@@ -23,7 +25,8 @@ export async function uploadDocumentToPinecone(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        namespace: namespace,
+        user_id: userId,
+        agent_id: agentId,
         file_path: filePath,
         nickname: nickname,
       }),
@@ -43,28 +46,28 @@ export async function uploadDocumentToPinecone(
 }
 
 /**
- * Uploads a website to Pinecone via the backend API
- * @param namespace - The Pinecone namespace
- * @param url - The website URL
- * @param nickname - The nickname for the website
+ * Uploads website URLs via the backend API
+ * @param userId - The user ID
+ * @param agentId - The agent ID
+ * @param sites - Array of sites with url and nickname
  * @returns Promise that resolves when the upload is complete
  */
 export async function uploadWebsiteToPinecone(
-  namespace: string,
-  url: string,
-  nickname: string,
+  userId: string,
+  agentId: string,
+  sites: Array<{ url: string; nickname: string }>,
 ): Promise<void> {
   try {
-    const apiUrl = `/api/pinecone_website_upload`;
+    const apiUrl = `/api/website/add_urls`;
     const response = await fetch(apiUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        namespace: namespace,
-        url: url,
-        nickname: nickname,
+        user_id: userId,
+        agent_id: agentId,
+        sites,
       }),
     });
 
@@ -772,43 +775,26 @@ export async function confirmSource(
 }
 
 /**
- * Starts a batch sync for Slack channels
+ * Adds Slack channels for upload
  * @param userId - The user ID
  * @param agentId - The agent ID
- * @param channels - Array of channel objects with channel_id, channel_name, and team_id
- * @param timezone - Optional timezone (defaults to browser timezone)
- * @param limit - Optional limit for messages per channel (defaults to 500)
- * @returns Promise that resolves with the batch sync start response
+ * @param channels - Array of channel objects with channel_id, channel_name, and nickname
+ * @returns Promise that resolves with the add channels response
  */
 export async function startSlackBatchSync(
   userId: string,
   agentId: string,
-  namespace: string,
   channels: Array<{
     channel_id: string;
     channel_name: string;
     nickname: string;
   }>,
-  chunkN = 20,
-  overlapN = 5,
-): Promise<{
-  batch_id: string;
-  next: {
-    status_endpoint: string;
-    tick_endpoint: string;
-  };
-  ok: boolean;
-  status: string;
-  total: number;
-}> {
+): Promise<any> {
   try {
-    const apiUrl = `/api/pinecone_slack_upload_batch`;
+    const apiUrl = `/api/slack/add_channels`;
     const requestBody = {
       uid: userId,
       agent_id: agentId,
-      namespace,
-      chunk_n: chunkN,
-      overlap_n: overlapN,
       channels,
     };
 
@@ -829,7 +815,7 @@ export async function startSlackBatchSync(
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error("Error calling Slack batch sync start API:", error);
+    console.error("Error calling Slack add channels API:", error);
     throw error;
   }
 }
