@@ -34,6 +34,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   InputOTP,
   InputOTPGroup,
@@ -64,11 +65,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-
-// Dummy data - will be replaced with Firebase data
-const dummyTasks = {
-  hasPendingTasks: false,
-};
 
 const dummyAgentRuns = [
   {
@@ -156,6 +152,24 @@ export default function DashboardPage() {
   const [isBookingSetup, setIsBookingSetup] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(false);
   const [isFreeTrialing, setisFreeTrialing] = useState(false);
+  const [pendingTasksCount, setPendingTasksCount] = useState<number | null>(
+    null,
+  );
+  const [pendingTasksItems, setPendingTasksItems] = useState<
+    {
+      reviewId: string;
+      nodeLabel: string;
+      agentName: string;
+      agentId: string;
+      nodeId: string;
+      createdAt: string;
+    }[]
+  >([]);
+  const [isLoadingTasks, setIsLoadingTasks] = useState(true);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [isDeletingTasks, setIsDeletingTasks] = useState(false);
   const [deleteAgentDialogOpen, setDeleteAgentDialogOpen] = useState(false);
   const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
   const [isDeletingAgent, setIsDeletingAgent] = useState(false);
@@ -195,6 +209,65 @@ export default function DashboardPage() {
 
     fetchAgents();
   }, []);
+
+  useEffect(() => {
+    const fetchPendingTasks = async () => {
+      try {
+        const user = auth.currentUser;
+        if (!user) {
+          setPendingTasksCount(0);
+          return;
+        }
+        const response = await fetch("/api/workflow/for-review/list", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: user.uid, status: "pending" }),
+        });
+        if (!response.ok) {
+          setPendingTasksCount(0);
+          return;
+        }
+        const data = await response.json();
+        setPendingTasksCount(
+          typeof data.count === "number" ? data.count : 0,
+        );
+        if (data.success && Array.isArray(data.items)) {
+          setPendingTasksItems(
+            data.items.map(
+              (item: Record<string, unknown>) => ({
+                reviewId: String(item.reviewId ?? ""),
+                nodeLabel: String(item.nodeLabel ?? ""),
+                agentName: String(item.agentName ?? ""),
+                agentId: String(item.agentId ?? ""),
+                nodeId: String(item.nodeId ?? ""),
+                createdAt: String(item.createdAt ?? ""),
+              }),
+            ),
+          );
+        }
+      } catch (error) {
+        console.error("Failed to fetch pending tasks:", error);
+        setPendingTasksCount(0);
+      } finally {
+        setIsLoadingTasks(false);
+      }
+    };
+
+    fetchPendingTasks();
+  }, []);
+
+  useEffect(() => {
+    setSelectedTaskIds((prev) => {
+      const availableIds = new Set(pendingTasksItems.map((item) => item.reviewId));
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (availableIds.has(id)) {
+          next.add(id);
+        }
+      });
+      return next;
+    });
+  }, [pendingTasksItems]);
 
   useEffect(() => {
     return () => {
@@ -788,9 +861,15 @@ export default function DashboardPage() {
 
     // Navigate to the corresponding agent creation page with ?new=true query param
     switch (type.toLowerCase()) {
-      case "workflow":
       case "copilots":
         toast.info("Workflow coming soon!");
+        break;
+      case "workflow":
+        posthog?.capture("create_new_agent: started", {
+          ...getPosthogAuthProps(),
+          agent_type: "workflow",
+        });
+        router.push("/workflowAgent?new=true");
         break;
       case "source chat":
         posthog?.capture("create_new_agent: started", {
@@ -812,9 +891,16 @@ export default function DashboardPage() {
   };
 
   const handleAgentRowClick = (agent: Agent) => {
+    posthog?.capture("agent: opened", {
+      ...getPosthogAuthProps(),
+      agent_id: agent.id,
+      agent_name: agent.name || "",
+      agent_type: agent.type,
+    });
+
     const basePath =
       agent.type === "workflow"
-        ? "/workflowAgent"
+        ? "/use-workflow"
         : agent.type === "source chat"
           ? "/chatAgent"
           : "/copilotAgent";
@@ -885,6 +971,45 @@ export default function DashboardPage() {
       toast.error("Something went wrong deleting the agent.");
     } finally {
       setIsDeletingAgent(false);
+    }
+  };
+
+  const handleDeleteTasks = async () => {
+    if (selectedTaskIds.size === 0 || isDeletingTasks) {
+      return;
+    }
+    const user = auth.currentUser;
+    if (!user) {
+      toast.error("You must be signed in to delete tasks.");
+      return;
+    }
+    const reviewIds = Array.from(selectedTaskIds);
+    setIsDeletingTasks(true);
+    try {
+      const response = await fetch("/api/workflow/for-review/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.uid,
+          review_ids: reviewIds,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || data?.success === false) {
+        toast.error("Failed to delete selected tasks.");
+        return;
+      }
+      setPendingTasksItems((prev) =>
+        prev.filter((item) => !selectedTaskIds.has(item.reviewId)),
+      );
+      setPendingTasksCount((prev) => Math.max((prev ?? 0) - reviewIds.length, 0));
+      setSelectedTaskIds(new Set());
+      toast.success("Selected tasks deleted.");
+    } catch (error) {
+      console.error("Failed to delete selected tasks:", error);
+      toast.error("Failed to delete selected tasks.");
+    } finally {
+      setIsDeletingTasks(false);
     }
   };
 
@@ -1272,14 +1397,104 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {/* Your Tasks Section */}
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold">Your Tasks</h2>
-          <div className="rounded-lg border bg-card p-6">
-            {dummyTasks.hasPendingTasks ? (
-              <p className="text-sm text-muted-foreground">
-                You have pending tasks
-              </p>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => router.push("/for-review-dashboard")}
+              className="text-lg font-semibold hover:underline underline-offset-4 text-left"
+            >
+              Your tasks{!isLoadingTasks && pendingTasksCount !== null ? ` (${pendingTasksCount})` : ""}
+            </button>
+            {selectedTaskIds.size > 0 && (
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={handleDeleteTasks}
+                disabled={isDeletingTasks}
+              >
+                {isDeletingTasks ? "Deleting..." : "Delete tasks"}
+              </Button>
+            )}
+          </div>
+          <div
+            className="rounded-lg border bg-card cursor-pointer hover:bg-accent transition-colors"
+            onClick={() => router.push("/for-review-dashboard")}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ")
+                router.push("/for-review-dashboard");
+            }}
+          >
+            {isLoadingTasks ? (
+              <p className="text-sm text-muted-foreground p-6">Loading tasks...</p>
+            ) : pendingTasksItems.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="py-2 px-4 w-10" />
+                      <th className="text-left py-2 px-4 text-sm font-medium text-muted-foreground">
+                        Node
+                      </th>
+                      <th className="text-left py-2 px-4 text-sm font-medium text-muted-foreground">
+                        Agent
+                      </th>
+                      <th className="text-left py-2 px-4 text-sm font-medium text-muted-foreground">
+                        Created
+                      </th>
+                      <th className="py-2 px-4" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingTasksItems.map((item) => (
+                      <tr
+                        key={item.reviewId}
+                        className="border-b last:border-b-0"
+                      >
+                        <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={selectedTaskIds.has(item.reviewId)}
+                            onCheckedChange={(checked) => {
+                              setSelectedTaskIds((prev) => {
+                                const next = new Set(prev);
+                                if (checked) {
+                                  next.add(item.reviewId);
+                                } else {
+                                  next.delete(item.reviewId);
+                                }
+                                return next;
+                              });
+                            }}
+                            aria-label={`Select ${item.nodeLabel}`}
+                          />
+                        </td>
+                        <td className="py-3 px-4 text-sm">{item.nodeLabel}</td>
+                        <td className="py-3 px-4 text-sm">{item.agentName}</td>
+                        <td className="py-3 px-4 text-sm text-muted-foreground">
+                          {new Date(item.createdAt).toLocaleDateString()}
+                        </td>
+                        <td className="py-3 px-4">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              router.push(
+                                `/for-review?reviewId=${item.reviewId}`,
+                              );
+                            }}
+                          >
+                            Review
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : (
-              <>
+              <div className="p-6">
                 <p className="text-sm text-muted-foreground mb-4">
                   No pending tasks
                 </p>
@@ -1289,7 +1504,7 @@ export default function DashboardPage() {
                 >
                   What are agent tasks? →
                 </Link>
-              </>
+              </div>
             )}
           </div>
         </div>

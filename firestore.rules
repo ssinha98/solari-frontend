@@ -67,11 +67,37 @@ service cloud.firestore {
       match /users/{userId} {
         // self can write own membership doc
         allow read, write: if isSignedIn() && request.auth.uid == userId;
+
+        // ✅ team-scoped Slack installations
+        match /slack_installations/{installationId} {
+          allow read: if isSignedIn() && request.auth.uid == userId;
+          allow delete: if isSignedIn() && request.auth.uid == userId;
+          allow create, update: if false;
+        }
+
+        // ✅ per-user agent index under team user doc
+        match /agents/{agentId} {
+          allow read: if isSignedIn() && request.auth.uid == userId;
+          allow write: if false;
+
+          // ✅ allow client to read pinecone batch status docs (server-only writes)
+          match /slack_pinecone_batches/{batchId} {
+            allow read: if isSignedIn() && request.auth.uid == userId;
+            allow write: if false;
+          }
+        }
       }
 
-      // 📦 Team-level sources
-      match /sources/{sourceId} {
-        allow read, write: if isTeamMember(teamId);
+      // ✅ upload jobs (server/worker writes; clients read for status UI)
+      match /upload_jobs/{jobId} {
+        allow read: if isTeamMember(teamId) || userTeamId() == teamId;
+        allow create, update, delete: if false;
+      }
+
+      // ✅ workflow runs (server/backend writes; clients read for run status UI)
+      match /runs/{runId} {
+        allow read: if isTeamMember(teamId) || userTeamId() == teamId;
+        allow write: if false;
       }
 
       // 🤖 Agents collection
@@ -84,25 +110,47 @@ service cloud.firestore {
         // admins can write agent docs
         allow write: if isTeamAdmin(teamId);
 
+        // ✅ UPDATED agent-members permissions (your requested addition)
         match /agent-members/{memberId} {
-          // only team members can read agent members
-          allow read: if isTeamMember(teamId);
+          // allow read for team members OR user matching their own memberId OR userTeamId matches team
+          allow read: if
+            isTeamMember(teamId)
+            || (isSignedIn() && request.auth.uid == memberId)
+            || userTeamId() == teamId;
 
           // only team admins can change agent membership
           allow create, update, delete: if isTeamAdmin(teamId);
         }
 
+        // ✅ team-scoped agent sources
         match /sources/{sourceId} {
           allow read, write: if isTeamMember(teamId);
+
+          // ✅ transcript chunks under team-scoped agent source
+          match /transcript_chunks/{chunkId} {
+            allow read, write: if isTeamMember(teamId);
+          }
         }
 
+        // ✅ team-scoped agent ratings
         match /ratings/{ratingId} {
           allow read, write: if isTeamMember(teamId);
         }
 
+        // ✅ team-scoped slack sync batches (already used elsewhere)
         match /slack_sync_batches/{batchId} {
           allow read: if isTeamMember(teamId);
           allow write: if false;
+        }
+      }
+
+      // ✅ team-scoped sources at team level (sibling to agents)
+      match /sources/{sourceId} {
+        allow read, write: if isTeamMember(teamId);
+
+        // ✅ transcript chunks under team-scoped team source
+        match /transcript_chunks/{chunkId} {
+          allow read, write: if isTeamMember(teamId);
         }
       }
     }

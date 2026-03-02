@@ -1,20 +1,22 @@
 import { NextResponse } from "next/server";
-import { getBackendUrl, getHandleRagMessagePath } from "@/tools/backend-config";
+import { getBackendUrl } from "@/tools/backend-config";
 
 export async function POST(req: Request) {
   try {
     const body = await req.text();
     const backendUrl = getBackendUrl();
-    const path = getHandleRagMessagePath();
 
-    const backendRes = await fetch(`${backendUrl}/${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-solari-key": process.env.SOLARI_INTERNAL_KEY!,
-      },
-      body,
-    });
+    const backendRes = await fetch(
+      `${backendUrl}/api/workflow/run/input-variables`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-solari-key": process.env.SOLARI_INTERNAL_KEY!,
+        },
+        body,
+      }
+    );
 
     if (!backendRes.ok) {
       const errorText = await backendRes.text();
@@ -27,11 +29,10 @@ export async function POST(req: Request) {
     const data = await backendRes.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error("Error in API route:", error);
+    console.error("Error in workflow input-variables route:", error);
     return new NextResponse(
       JSON.stringify({ error: "Internal server error" }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
 }
-

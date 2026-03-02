@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { getBackendUrl, getHandleRagMessagePath } from "@/tools/backend-config";
+import { getBackendUrl } from "@/tools/backend-config";
 
 export async function POST(req: Request) {
   try {
     const body = await req.text();
     const backendUrl = getBackendUrl();
-    const path = getHandleRagMessagePath();
 
-    const backendRes = await fetch(`${backendUrl}/${path}`, {
+    const backendRes = await fetch(`${backendUrl}/api/workflow/run/node-feedback`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -27,11 +26,10 @@ export async function POST(req: Request) {
     const data = await backendRes.json();
     return NextResponse.json(data);
   } catch (error) {
-    console.error("Error in API route:", error);
+    console.error("Error in workflow run/node-feedback route:", error);
     return new NextResponse(
       JSON.stringify({ error: "Internal server error" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+      { status: 500, headers: { "Content-Type": "application/json" } },
     );
   }
 }
-

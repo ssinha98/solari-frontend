@@ -186,6 +186,26 @@ function getFileTypeIcon(source: { type?: string; name?: string }) {
           className="h-4 w-4"
         />
       );
+    case "gong":
+      return (
+        <Image
+          src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT_BvM2UUSzPNY4MoSXjitm2LASeRO2NUO44Q&s"
+          alt="Gong"
+          width={16}
+          height={16}
+          className="h-4 w-4"
+        />
+      );
+    case "posthog":
+      return (
+        <Image
+          src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/posthog.png"
+          alt="PostHog"
+          width={16}
+          height={16}
+          className="h-4 w-4"
+        />
+      );
     case "notion":
       return (
         <Image
@@ -201,6 +221,26 @@ function getFileTypeIcon(source: { type?: string; name?: string }) {
         <Image
           src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQiRxcqf6E93pRSDFSa2o8vuXjzc6IdaafuWA&s"
           alt="Gong"
+          width={16}
+          height={16}
+          className="h-4 w-4"
+        />
+      );
+    case "facebook_marketing":
+      return (
+        <Image
+          src="https://upload.wikimedia.org/wikipedia/commons/thumb/b/b9/2023_Facebook_icon.svg/960px-2023_Facebook_icon.svg.png"
+          alt="Facebook"
+          width={16}
+          height={16}
+          className="h-4 w-4"
+        />
+      );
+    case "linkedin":
+      return (
+        <Image
+          src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/LinkedIn_logo_initials.png/250px-LinkedIn_logo_initials.png"
+          alt="LinkedIn"
           width={16}
           height={16}
           className="h-4 w-4"
@@ -341,6 +381,8 @@ interface Message {
   };
 }
 
+const isDemoRag = () => process.env.NEXT_PUBLIC_USE_DEMO_RAG === "true";
+
 export function RunChat({ agentId }: { agentId: string | null }) {
   const posthog = usePostHog();
   const [sourcesExpanded, setSourcesExpanded] = useState(true);
@@ -351,6 +393,9 @@ export function RunChat({ agentId }: { agentId: string | null }) {
   >([]);
   const [isLoadingSources, setIsLoadingSources] = useState(false);
   const [isLoadingResponse, setIsLoadingResponse] = useState(false);
+  const [loadingPhase, setLoadingPhase] = useState<
+    "thinking" | "generating_sql" | null
+  >(null);
   const [selectedMetadata, setSelectedMetadata] = useState<
     AskPineconeResponse["metadata"] | null
   >(null);
@@ -660,6 +705,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
     setMessages((prev) => [...prev, newMessage]);
     setMessage("");
     setIsLoadingResponse(true);
+    setLoadingPhase("thinking");
 
     try {
       if (!teamId) {
@@ -716,6 +762,15 @@ export function RunChat({ agentId }: { agentId: string | null }) {
         requestId,
         modelProvider,
       );
+
+      if (isDemoRag()) {
+        await new Promise((r) => setTimeout(r, 1500));
+        if (response.sql) {
+          setLoadingPhase("generating_sql");
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+        setLoadingPhase(null);
+      }
 
       // Check if response needs source confirmation
       if (
@@ -791,6 +846,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setIsLoadingResponse(false);
+      setLoadingPhase(null);
     }
   };
 
@@ -817,6 +873,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
     }
 
     setIsLoadingResponse(true);
+    setLoadingPhase("thinking");
     try {
       const response = await confirmSource(
         userId,
@@ -829,6 +886,16 @@ export function RunChat({ agentId }: { agentId: string | null }) {
         sourceSuggestion,
         modelProvider,
       );
+
+      if (isDemoRag()) {
+        await new Promise((r) => setTimeout(r, 1500));
+        if (response.sql) {
+          setLoadingPhase("generating_sql");
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+        setLoadingPhase(null);
+      }
+
       const answerText =
         response.response_summarized ||
         response.answer ||
@@ -877,6 +944,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
       );
     } finally {
       setIsLoadingResponse(false);
+      setLoadingPhase(null);
       setSourceSelectionDialogOpen(false);
       setPendingConfirmationMessageId(null);
       setSelectedSourceId(null);
@@ -1067,7 +1135,7 @@ export function RunChat({ agentId }: { agentId: string | null }) {
               <p className="text-sm text-muted-foreground text-center py-4">
                 Loading sources...
               </p>
-            ) : currentSources.length > 0 ? (
+            ) : currentSources.filter((s) => s.type !== "all").length > 0 ? (
               <table className="w-full">
                 <thead>
                   <tr className="border-b">
@@ -1080,18 +1148,20 @@ export function RunChat({ agentId }: { agentId: string | null }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {currentSources.map((source) => (
-                    <tr key={source.id} className="border-b last:border-b-0">
-                      <td className="py-3 px-4">
-                        <div className="flex items-center">
-                          {getFileTypeIcon(source)}
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 text-sm">
-                        {source.nickname || source.name || "Untitled"}
-                      </td>
-                    </tr>
-                  ))}
+                  {currentSources
+                    .filter((s) => s.type !== "all")
+                    .map((source) => (
+                      <tr key={source.id} className="border-b last:border-b-0">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center">
+                            {getFileTypeIcon(source)}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-sm">
+                          {source.nickname || source.name || "Untitled"}
+                        </td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             ) : (
@@ -1445,7 +1515,11 @@ export function RunChat({ agentId }: { agentId: string | null }) {
               {isLoadingResponse && (
                 <div className="flex justify-start">
                   <div className="max-w-[80%] rounded-lg p-3 bg-background border border-border">
-                    <p className="text-sm text-muted-foreground">Thinking...</p>
+                    <p className="text-sm text-muted-foreground">
+                      {loadingPhase === "generating_sql"
+                        ? "Generating SQL..."
+                        : "Thinking..."}
+                    </p>
                   </div>
                 </div>
               )}

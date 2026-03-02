@@ -34,9 +34,11 @@ const pageTitles: Record<string, string> = {
   "/settings": "Settings",
   "/settings/jira_callback": "Manage Jira",
   "/workflowAgent": "Workflow Agent",
+  "/use-workflow": "Use Workflow",
   "/chatAgent": "Chat Agent",
   "/copilotAgent": "Copilot Agent",
   "/agent-analytics": "Agent Analytics",
+  "/workflow-analytics": "Workflow Analytics",
 };
 
 function DashboardHeader() {
@@ -57,9 +59,10 @@ function DashboardHeader() {
     null,
   );
 
-  // Check if we're on an agent page and have an agent name
+  // Check if we're on an agent page and have an agent name (from URL or to be resolved)
   const isAgentPage = [
     "/workflowAgent",
+    "/use-workflow",
     "/chatAgent",
     "/copilotAgent",
   ].includes(pathname);

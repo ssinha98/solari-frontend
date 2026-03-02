@@ -5,7 +5,7 @@
 
 // Switch between "test" and "prod" to change the backend URL
 // Change this value to switch environments
-const ENVIRONMENT = "prod" as "test" | "prod";
+const ENVIRONMENT = "test" as "test" | "prod";
 
 export const getBackendUrl = (): string => {
   // Use environment variable if set, otherwise use the ENVIRONMENT constant
@@ -18,3 +18,13 @@ export const getBackendUrl = (): string => {
     ? "http://localhost:5000"
     : "https://api.usesolari.ai";
 };
+
+/** When true, RAG requests go to demo endpoints (e.g. for filming). Set NEXT_PUBLIC_USE_DEMO_RAG=true */
+export const useDemoRag = (): boolean =>
+  process.env.NEXT_PUBLIC_USE_DEMO_RAG === "true";
+
+export const getHandleRagMessagePath = (): string =>
+  useDemoRag() ? "api/chat-agent-demo" : "api/handle-rag-message";
+
+export const getSourceConfirmedPath = (): string =>
+  useDemoRag() ? "api/chat-agent-demo" : "api/source-confirmed";

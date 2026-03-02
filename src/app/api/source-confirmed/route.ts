@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { getBackendUrl } from "@/tools/backend-config";
+import { getBackendUrl, getSourceConfirmedPath } from "@/tools/backend-config";
 
 export async function POST(req: Request) {
   try {
     const body = await req.text();
     const backendUrl = getBackendUrl();
-    
-    const backendRes = await fetch(`${backendUrl}/api/source-confirmed`, {
+    const path = getSourceConfirmedPath();
+
+    const backendRes = await fetch(`${backendUrl}/${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
