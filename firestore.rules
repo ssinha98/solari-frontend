@@ -153,6 +153,12 @@ service cloud.firestore {
           allow read, write: if isTeamMember(teamId);
         }
       }
+
+      // ✅ API keys (Pipedrive, Apollo) - admins can write, no client read (keys stay server-only)
+      match /integrations/{integrationId} {
+        allow create, update, delete: if isTeamAdmin(teamId);
+        allow read: if false;
+      }
     }
 
     // 🚫 Default deny

@@ -132,7 +132,9 @@ function UseWorkflowContent() {
 
   const isRunInProgress =
     !!currentRunId &&
-    (runStatus === "queued" || runStatus === "running");
+    (runStatus === "queued" ||
+      runStatus === "running" ||
+      runStatus === "paused_deep_research");
   const isRunCompleted = !!currentRunId && runStatus === "completed";
   const isRunForReview = !!currentRunId && runStatus === "for_review";
   const isRunPaused = !!currentRunId && runStatus === "paused";
@@ -142,7 +144,13 @@ function UseWorkflowContent() {
   // Poll run status every 3 seconds while a run is in progress
   useEffect(() => {
     if (!currentRunId || !agentId) return;
-    if (runStatus === "completed" || runStatus === "failed" || runStatus === "for_review" || runStatus === "paused") return;
+    if (
+      runStatus === "completed" ||
+      runStatus === "failed" ||
+      runStatus === "for_review" ||
+      runStatus === "paused"
+    )
+      return;
 
     const poll = async () => {
       const user = auth.currentUser;
@@ -622,22 +630,28 @@ function UseWorkflowContent() {
           )}
           <Button
             className={`flex-1 text-white disabled:opacity-60 ${
-              needsReview || isRunFailed
-                ? "bg-red-600 hover:bg-red-600/90"
-                : isRunCompleted
-                  ? "bg-green-600 hover:bg-green-600/90"
-                  : "bg-[#2D47BC] hover:bg-[#2D47BC]/90"
+              needsReview
+                ? "bg-orange-600 hover:bg-orange-600/90"
+                : isRunFailed
+                  ? "bg-red-600 hover:bg-red-600/90"
+                  : isRunCompleted
+                    ? "bg-green-600 hover:bg-green-600/90"
+                    : "bg-[#2D47BC] hover:bg-[#2D47BC]/90"
             }`}
             disabled={!allFilled || runLoading || isRunInProgress}
-            onClick={needsReview ? () => router.push(`/for-review?id=${agentId}`) : handleRun}
+            onClick={
+              needsReview
+                ? () => router.push("/for-review-dashboard")
+                : handleRun
+            }
           >
-            {runLoading ? (
+            {runLoading || runStatus === "paused_deep_research" ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Running…
               </>
             ) : needsReview ? (
-              "Error — nodes need review"
+              "Review Workflow"
             ) : isRunFailed ? (
               "Run failed"
             ) : isRunCompleted ? (

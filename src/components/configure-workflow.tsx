@@ -47,6 +47,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { computeRatingAnalytics, type RatingDoc } from "@/lib/utils";
@@ -101,6 +102,10 @@ export function ConfigureWorkflow({ agentId }: { agentId: string | null }) {
   // Trigger method
   const [triggerMethod, setTriggerMethod] = useState<string>("");
   const [isSavingTrigger, setIsSavingTrigger] = useState(false);
+
+  // Output type
+  const [tableOutputEnabled, setTableOutputEnabled] = useState(false);
+  const [isSavingOutputType, setIsSavingOutputType] = useState(false);
 
   // Analytics
   const [ratingStats, setRatingStats] = useState<ReturnType<
@@ -197,10 +202,18 @@ export function ConfigureWorkflow({ agentId }: { agentId: string | null }) {
         }
 
         const data = await response.json();
-        if (data.success && data.agent) {
-          if (typeof data.agent.trigger === "string") {
+        if (data.success) {
+          if (data.agent && typeof data.agent.trigger === "string") {
             setTriggerMethod(data.agent.trigger);
           }
+          const outputType =
+            data.outputType ??
+            data.agent?.outputType ??
+            data.agent?.output_type ??
+            data.version?.outputType ??
+            data.workflowConfig?.outputType ??
+            "single";
+          setTableOutputEnabled(outputType === "table");
         }
       } catch (error) {
         console.error("Failed to load workflow agent:", error);
@@ -479,6 +492,40 @@ export function ConfigureWorkflow({ agentId }: { agentId: string | null }) {
     }
   };
 
+  // ─── Output type handler ────────────────────────────────────────────────────
+
+  const handleOutputTypeChange = async (enabled: boolean) => {
+    setTableOutputEnabled(enabled);
+
+    const user = auth.currentUser;
+    if (!user || !agentId) return;
+
+    setIsSavingOutputType(true);
+    try {
+      const response = await fetch("/api/workflow/version/set-output-type", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.uid,
+          agent_id: agentId,
+          output_type: enabled ? "table" : "single",
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+
+      toast.success(enabled ? "Table output enabled" : "Table output disabled");
+    } catch (error) {
+      console.error("Failed to save output type:", error);
+      toast.error("Failed to save output type. Please try again.");
+      setTableOutputEnabled(!enabled);
+    } finally {
+      setIsSavingOutputType(false);
+    }
+  };
+
   // ─── Trigger method handler ─────────────────────────────────────────────────
 
   const handleTriggerChange = async (value: string) => {
@@ -702,18 +749,35 @@ export function ConfigureWorkflow({ agentId }: { agentId: string | null }) {
           </div>
         </div>
 
-        {/* Top Right — Add Step (placeholder) */}
+        {/* Top Right — Output Type */}
         <div className="rounded-lg bg-muted p-6 flex flex-col h-[calc(50vh-6rem)]">
           <div className="mb-4">
-            <h2 className="text-lg font-semibold mb-1">Add Step</h2>
+            <h2 className="text-lg font-semibold mb-1">Output Type</h2>
             <p className="text-sm text-muted-foreground">
-              Add a new step to this workflow.
+              Configure how this workflow produces output.
             </p>
           </div>
-          <div className="flex-1 overflow-y-auto flex flex-col items-center justify-center gap-3 text-center">
-            <p className="text-sm text-muted-foreground">
-              Step types coming soon.
-            </p>
+          <div className="flex-1 overflow-y-auto">
+            <Card>
+              <CardContent className="flex items-center justify-between p-4">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="table-output" className="text-sm font-medium cursor-pointer">
+                    Table output
+                  </Label>
+                  {isSavingOutputType && (
+                    <span className="text-xs text-muted-foreground animate-pulse">
+                      Saving…
+                    </span>
+                  )}
+                </div>
+                <Switch
+                  id="table-output"
+                  checked={tableOutputEnabled}
+                  onCheckedChange={handleOutputTypeChange}
+                  disabled={isSavingOutputType}
+                />
+              </CardContent>
+            </Card>
           </div>
         </div>
 

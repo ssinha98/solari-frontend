@@ -29,6 +29,7 @@ import {
   Upload,
   Menu,
   ChevronDown,
+  Plus,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -52,6 +53,7 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -62,8 +64,10 @@ import {
   type CustomDateRangeValue,
 } from "@/components/ui/DateTimePicker";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   ReactFlow,
@@ -109,7 +113,8 @@ type ConnectorService =
   | "confluence"
   | "facebook_ads"
   | "linkedin_ads"
-  | "apollo";
+  | "apollo"
+  | "pipedrive";
 
 type EvalType = "llm_judge" | "toxicity" | "pii" | "regex" | "proximity";
 
@@ -117,8 +122,12 @@ type NodeKind =
   | "trigger"
   | "llm"
   | "connector"
+  | "website"
+  | "deepResearch"
+  | "agenticSearch"
   | "eval"
   | "forReview"
+  | "email"
   | "complete"
   | "action"
   | "condition";
@@ -146,7 +155,15 @@ interface WorkflowNodeData extends Record<string, unknown> {
   // requires input variable (llm, connector, output, action, condition)
   requiresInputVariable?: boolean;
   inputVariableName?: string;
+  inputVariableName2?: string;
+  inputVariableName3?: string;
+  inputVariableName4?: string;
+  inputVariableName5?: string;
   inputVariableType?: "string" | "file";
+  inputVariableType2?: "string" | "file";
+  inputVariableType3?: "string" | "file";
+  inputVariableType4?: "string" | "file";
+  inputVariableType5?: "string" | "file";
   // gong
   gongAction?: "get_call" | "get_calls";
   gongCallId?: string;
@@ -168,7 +185,15 @@ interface WorkflowNodeData extends Record<string, unknown> {
   apolloEmployeeRange?: string;
   apolloPersonEmail?: string;
   apolloPersonLinkedin?: string;
+  apolloPersonFullName?: string;
+  apolloPersonCompany?: string;
+  apolloPrompt?: string;
   apolloCompanyDomain?: string;
+  // pipedrive
+  pipedriveName?: string;
+  pipedriveCompany?: string;
+  pipedriveEmail?: string;
+  pipedriveLinkedin?: string;
   // confluence
   confluenceSelectedPages?: Array<{
     id: string;
@@ -213,9 +238,35 @@ interface WorkflowNodeData extends Record<string, unknown> {
   // action
   actionType?: string;
   actionParams?: string;
+  // email
+  emailTo?: string;
+  emailFrom?: string;
+  emailSubject?: string;
+  emailBody?: string;
+  // website
+  websiteUrl?: string;
+  websitePrompt?: string;
+  // deep research
+  deepResearchProvider?:
+    | "perplexity_deep_research"
+    | "perplexity_sonar_pro"
+    | "openai_deep_research";
+  deepResearchPrompt?: string;
+  // agentic search
+  agenticSearchQuery?: string;
+  engine?: "firecrawl" | "perplexity"; // saved to Firebase under "engine"
+  agenticSearchEngine?: "firecrawl" | "perplexity"; // legacy, prefer engine when both exist
+  agenticSearchSources?: ("web" | "news")[];
+  agenticSearchWebsite?: string;
+  agenticSearchRelatedDomain?: string;
+  agentSearchLimit?: string;
   // output
   outputFormat?: "json" | "text" | "markdown";
   outputDestination?: string;
+  // table output (when workflow outputType is "table")
+  tableOutputColumn?: string;
+  // agentic search / table nodes: field -> column mapping
+  columnMappings?: Array<{ field: string; column: string }>;
 }
 
 // ─── Node Config ─────────────────────────────────────────────────────────────
@@ -232,6 +283,7 @@ const CONNECTOR_META: Record<
   facebook_ads: { label: "Facebook Ads", icon: "📘" },
   linkedin_ads: { label: "LinkedIn Ads", icon: "💼" },
   apollo: { label: "Apollo", icon: "🚀" },
+  pipedrive: { label: "Pipedrive", icon: "🔶" },
 };
 
 const EVAL_META: Record<EvalType, { label: string; icon: string }> = {
@@ -289,6 +341,23 @@ const NODE_KINDS: {
     // icon: "🔌",
   },
   {
+    kind: "website",
+    label: "Website",
+    description: "Fetch website content",
+    // icon: "🌐",
+  },
+  {
+    kind: "deepResearch",
+    label: "Deep Research",
+    description: "Run deep research with OpenAI or Perplexity",
+    // icon: "🔍",
+  },
+  {
+    kind: "agenticSearch",
+    label: "Agentic Search",
+    description: "Run agentic search",
+  },
+  {
     kind: "eval",
     label: "Eval",
     description: "Evaluate the output",
@@ -299,6 +368,12 @@ const NODE_KINDS: {
     label: "For Review",
     description: "Flag for human review",
     // icon: "👁️",
+  },
+  {
+    kind: "email",
+    label: "Email",
+    description: "Send an email",
+    // icon: "✉️",
   },
   {
     kind: "action",
@@ -327,8 +402,12 @@ const KIND_STYLES: Record<
   trigger: { border: "#f97316", accent: "#fff7ed", tag: "#f97316" },
   llm: { border: "#6366f1", accent: "#eef2ff", tag: "#6366f1" },
   connector: { border: "#3b82f6", accent: "#eff6ff", tag: "#3b82f6" },
+  website: { border: "#3b82f6", accent: "#eff6ff", tag: "#3b82f6" },
+  deepResearch: { border: "#6366f1", accent: "#eef2ff", tag: "#6366f1" },
+  agenticSearch: { border: "#6366f1", accent: "#eef2ff", tag: "#6366f1" },
   eval: { border: "#a855f7", accent: "#faf5ff", tag: "#a855f7" },
   forReview: { border: "#f43f5e", accent: "#fff1f2", tag: "#f43f5e" },
+  email: { border: "#fafafa", accent: "#fafafa", tag: "#fafafa" },
   complete: { border: "#10b981", accent: "#ecfdf5", tag: "#10b981" },
   action: { border: "#3b82f6", accent: "#eff6ff", tag: "#3b82f6" },
   condition: { border: "#a855f7", accent: "#faf5ff", tag: "#a855f7" },
@@ -353,7 +432,7 @@ function WorkflowNode({ data, selected }: NodeProps) {
           ? `0 0 0 2px ${styles.border}33, 0 8px 32px #00000060`
           : "0 4px 16px #00000040",
         transition: "all 0.15s ease",
-        overflow: "hidden",
+        overflow: "visible",
       }}
     >
       {/* Top accent bar */}
@@ -475,6 +554,15 @@ function WorkflowNode({ data, selected }: NodeProps) {
               style={{ borderRadius: 2, flexShrink: 0 }}
             />
           )}
+          {kind === "connector" && nodeData.connectorService === "pipedrive" && (
+            <Image
+              src="https://img.icons8.com/?size=100&id=85015&format=png&color=000000"
+              alt="Pipedrive"
+              width={14}
+              height={14}
+              style={{ borderRadius: 2, flexShrink: 0 }}
+            />
+          )}
           {label}
         </div>
 
@@ -568,7 +656,7 @@ const panelTextareaStyle: React.CSSProperties = {
 
 interface WorkflowVariable {
   name: string;
-  kind: "input" | "output";
+  kind: "input" | "output" | "column";
   nodeLabel: string;
 }
 
@@ -640,7 +728,12 @@ function workflowMentionSuggestionRender(editorRef: React.MutableRefObject<any>)
       nameEl.style.color = i === selectedIndex ? "white" : "#fafafa";
 
       const metaEl = document.createElement("div");
-      metaEl.textContent = `${item.nodeLabel} · ${item.kind === "input" ? "user input" : "node output"}`;
+      metaEl.textContent =
+        item.kind === "input"
+          ? `${item.nodeLabel} · user input`
+          : item.kind === "column"
+            ? `${item.nodeLabel} · table column`
+            : `${item.nodeLabel} · node output`;
       metaEl.style.fontSize = "11px";
       metaEl.style.color = i === selectedIndex ? "rgba(255,255,255,0.75)" : "#71717a";
 
@@ -775,7 +868,7 @@ function WorkflowMentionTextarea({
             const q = query.toLowerCase();
             return variablesRef.current
               .filter((v) => v.name.toLowerCase().includes(q))
-              .slice(0, 10);
+              .slice(0, 20);
           },
           render: () => workflowMentionSuggestionRender(editorRef),
         },
@@ -875,6 +968,10 @@ function WorkflowMentionTextarea({
 
 // ─── Per-kind panel bodies ────────────────────────────────────────────────────
 
+function sanitizeVariableName(s: string): string {
+  return s.replace(/\s+/g, "_");
+}
+
 function SaveOutputField({
   value,
   onChange,
@@ -931,7 +1028,7 @@ function SaveOutputField({
           }}
           placeholder="e.g. slack_output"
           value={value ?? ""}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(sanitizeVariableName(e.target.value))}
         />
       </div>
     </>
@@ -941,10 +1038,16 @@ function SaveOutputField({
 function RequiresInputVariableField({
   data,
   onChange,
+  agentId,
+  nodeId,
 }: {
   data: WorkflowNodeData;
   onChange: (patch: Partial<WorkflowNodeData>) => void;
+  agentId?: string | null;
+  nodeId?: string;
 }) {
+  const [deletingIndex, setDeletingIndex] = useState<number | null>(null);
+
   return (
     <div style={{ marginBottom: 20 }}>
       <Separator className="bg-[#27272a] my-2" />
@@ -953,16 +1056,16 @@ function RequiresInputVariableField({
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 8,
+            gap: 6,
           }}
         >
           <Checkbox
             id="requires-input-variable"
+            className="border-[#3f3f46] data-[state=checked]:bg-[#2D47BC] data-[state=checked]:border-[#2D47BC] shrink-0"
             checked={!!data.requiresInputVariable}
             onCheckedChange={(checked) =>
               onChange({ requiresInputVariable: !!checked })
             }
-            className="border-[#3f3f46] data-[state=checked]:bg-[#2D47BC] data-[state=checked]:border-[#2D47BC]"
           />
           <label
             htmlFor="requires-input-variable"
@@ -1004,67 +1107,276 @@ function RequiresInputVariableField({
         </div>
         {data.requiresInputVariable && (
           <>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: "#71717a",
-                  letterSpacing: "0.04em",
-                  textTransform: "uppercase",
-                }}
-              >
-                Input variable name
-              </div>
-              <input
-                style={{
-                  ...panelInputStyle,
-                  fontFamily: "var(--font-geist-mono), monospace",
-                }}
-                placeholder="e.g. my_input"
-                value={data.inputVariableName ?? ""}
-                onChange={(e) =>
-                  onChange({ inputVariableName: e.target.value || undefined })
+            {([
+              {
+                nameKey: "inputVariableName" as const,
+                typeKey: "inputVariableType" as const,
+                placeholder: "e.g. my_input (1)",
+              },
+              {
+                nameKey: "inputVariableName2" as const,
+                typeKey: "inputVariableType2" as const,
+                placeholder: "e.g. my_input_2 (2)",
+              },
+              {
+                nameKey: "inputVariableName3" as const,
+                typeKey: "inputVariableType3" as const,
+                placeholder: "e.g. my_input_3 (3)",
+              },
+              {
+                nameKey: "inputVariableName4" as const,
+                typeKey: "inputVariableType4" as const,
+                placeholder: "e.g. my_input_4 (4)",
+              },
+              {
+                nameKey: "inputVariableName5" as const,
+                typeKey: "inputVariableType5" as const,
+                placeholder: "e.g. my_input_5 (5)",
+              },
+            ] as const).map((slot, idx) => {
+              const nameVal = data[slot.nameKey];
+              const isFirst = idx === 0;
+              const isVisible = isFirst || nameVal !== undefined;
+              if (!isVisible) return null;
+
+              const nameKeys = [
+                "inputVariableName",
+                "inputVariableName2",
+                "inputVariableName3",
+                "inputVariableName4",
+                "inputVariableName5",
+              ] as const;
+              const typeKeys = [
+                "inputVariableType",
+                "inputVariableType2",
+                "inputVariableType3",
+                "inputVariableType4",
+                "inputVariableType5",
+              ] as const;
+              const handleDelete = async () => {
+                setDeletingIndex(idx);
+                const patch: Partial<WorkflowNodeData> = {};
+                for (let i = idx; i < 4; i++) {
+                  patch[nameKeys[i]] = data[nameKeys[i + 1]] ?? undefined;
+                  patch[typeKeys[i]] = data[typeKeys[i + 1]] ?? undefined;
                 }
-              />
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: "#71717a",
-                  letterSpacing: "0.04em",
-                  textTransform: "uppercase",
-                }}
-              >
-                Input variable type
-              </div>
-              <Select
-                value={data.inputVariableType ?? "string"}
-                onValueChange={(val: "string" | "file") =>
-                  onChange({ inputVariableType: val })
+                patch[nameKeys[4]] = undefined;
+                patch[typeKeys[4]] = undefined;
+
+                try {
+                  if (agentId && nodeId) {
+                    const user = auth.currentUser;
+                    if (!user) {
+                      setDeletingIndex(null);
+                      return;
+                    }
+                    const res = await fetch(
+                      "/api/workflow/node/remove-input-variable",
+                      {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          user_id: user.uid,
+                          agent_id: agentId,
+                          node_id: nodeId,
+                          input_variable_number: idx + 1,
+                        }),
+                      }
+                    );
+                    if (!res.ok) {
+                      const err = await res.text();
+                      toast.error(err || "Failed to remove input variable");
+                      setDeletingIndex(null);
+                      return;
+                    }
+                  }
+
+                  onChange(patch);
+                } catch (error) {
+                  console.error("Failed to remove input variable:", error);
+                  toast.error("Failed to remove input variable");
+                } finally {
+                  setDeletingIndex(null);
                 }
-              >
-                <SelectTrigger className="w-full bg-[#09090b] border-[#3f3f46] text-[#fafafa] hover:bg-[#09090b] focus:ring-0 focus:ring-offset-0">
-                  <SelectValue placeholder="Select type…" />
-                </SelectTrigger>
-                <SelectContent className="bg-[#18181b] border-[#27272a] text-[#fafafa]">
-                  <SelectItem
-                    value="string"
-                    className="text-[#fafafa] focus:bg-[#27272a]"
+              };
+
+              return (
+                <div
+                  key={slot.nameKey}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    marginBottom: idx > 0 ? 12 : 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 6,
+                      alignItems: "flex-start",
+                    }}
                   >
-                    String
-                  </SelectItem>
-                  <SelectItem
-                    value="file"
-                    className="text-[#fafafa] focus:bg-[#27272a]"
-                  >
-                    File
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+                    <div
+                      style={{
+                        flex: 1,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "#71717a",
+                          letterSpacing: "0.04em",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        Variable name
+                      </div>
+                      <input
+                        style={{
+                          ...panelInputStyle,
+                          fontFamily: "var(--font-geist-mono), monospace",
+                        }}
+                        placeholder={slot.placeholder}
+                        value={nameVal ?? ""}
+                        onChange={(e) => {
+                          const sanitized = sanitizeVariableName(
+                            e.target.value
+                          );
+                          onChange({
+                            [slot.nameKey]: sanitized || undefined,
+                          } as Partial<WorkflowNodeData>);
+                        }}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        width: 100,
+                        flexShrink: 0,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "#71717a",
+                          letterSpacing: "0.04em",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        Type
+                      </div>
+                      <Select
+                        value={
+                          (data[slot.typeKey] ?? "string") as "string" | "file"
+                        }
+                        onValueChange={(val: "string" | "file") =>
+                          onChange({
+                            [slot.typeKey]: val,
+                          } as Partial<WorkflowNodeData>)
+                        }
+                      >
+                        <SelectTrigger className="w-full bg-[#09090b] border-[#3f3f46] text-[#fafafa] hover:bg-[#09090b] focus:ring-0 focus:ring-offset-0 min-w-0">
+                          <SelectValue placeholder="Type…" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[#18181b] border-[#27272a] text-[#fafafa]">
+                          <SelectItem
+                            value="string"
+                            className="text-[#fafafa] focus:bg-[#27272a]"
+                          >
+                            String
+                          </SelectItem>
+                          <SelectItem
+                            value="file"
+                            className="text-[#fafafa] focus:bg-[#27272a]"
+                          >
+                            File
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleDelete}
+                      disabled={deletingIndex === idx}
+                      style={{
+                        marginTop: 24,
+                        padding: 6,
+                        background: "transparent",
+                        border: "none",
+                        borderRadius: 6,
+                        color: "#71717a",
+                        cursor: deletingIndex === idx ? "wait" : "pointer",
+                        flexShrink: 0,
+                      }}
+                      className="hover:bg-[#27272a] hover:text-[#a1a1aa] transition-colors disabled:hover:bg-transparent"
+                      aria-label="Delete input variable"
+                    >
+                      {deletingIndex === idx ? (
+                        <Loader2
+                          size={16}
+                          className="animate-spin"
+                        />
+                      ) : (
+                        <Trash2 size={16} />
+                      )}
+                    </button>
+                  </div>
+                  {idx < 4 &&
+                    (data[
+                      (
+                        [
+                          "inputVariableName2",
+                          "inputVariableName3",
+                          "inputVariableName4",
+                          "inputVariableName5",
+                        ] as const
+                      )[idx]
+                    ] === undefined ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextNameKey = (
+                            [
+                              "inputVariableName2",
+                              "inputVariableName3",
+                              "inputVariableName4",
+                              "inputVariableName5",
+                            ] as const
+                          )[idx];
+                          onChange({
+                            [nextNameKey]: "",
+                          } as Partial<WorkflowNodeData>);
+                        }}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "6px 10px",
+                          background: "transparent",
+                          border: "1px dashed #3f3f46",
+                          borderRadius: 6,
+                          color: "#71717a",
+                          fontSize: 11,
+                          cursor: "pointer",
+                          width: "fit-content",
+                        }}
+                        className="hover:bg-[#27272a] hover:border-[#52525b] hover:text-[#a1a1aa] transition-colors"
+                      >
+                        <Plus size={14} />
+                        Add another input variable
+                      </button>
+                    ) : null)}
+                </div>
+              );
+            })}
           </>
         )}
       </div>
@@ -1128,11 +1440,15 @@ function LLMPanel({
   onChange,
   onSave,
   availableVariables,
+  outputType = "single",
+  agentId,
 }: {
   data: WorkflowNodeData;
   onChange: (patch: Partial<WorkflowNodeData>) => void;
   onSave: (patch: Partial<WorkflowNodeData>) => Promise<boolean>;
   availableVariables: WorkflowVariable[];
+  outputType?: "single" | "table";
+  agentId?: string | null;
 }) {
   return (
     <>
@@ -1211,10 +1527,19 @@ function LLMPanel({
           onChange={(e) => onChange({ description: e.target.value })}
         />
       </PanelField>
-      <SaveOutputField
-        value={data.outputVariable}
-        onChange={(val) => onChange({ outputVariable: val })}
-      />
+      {outputType === "table" ? (
+        <TableConfigurationSection
+          kind="llm"
+          data={data}
+          onChange={onChange}
+          agentId={agentId}
+        />
+      ) : (
+        <SaveOutputField
+          value={data.outputVariable}
+          onChange={(val) => onChange({ outputVariable: val })}
+        />
+      )}
     </>
   );
 }
@@ -1780,9 +2105,11 @@ function JiraPanel({
 function GongPanel({
   data,
   onChange,
+  availableVariables,
 }: {
   data: WorkflowNodeData;
   onChange: (patch: Partial<WorkflowNodeData>) => void;
+  availableVariables: WorkflowVariable[];
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -1817,11 +2144,12 @@ function GongPanel({
       {/* Get call — call ID input */}
       {data.gongAction === "get_call" && (
         <PanelField label="Call ID">
-          <input
-            style={panelInputStyle}
-            placeholder="Input a call ID"
+          <WorkflowMentionTextarea
             value={data.gongCallId ?? ""}
-            onChange={(e) => onChange({ gongCallId: e.target.value })}
+            onChange={(v) => onChange({ gongCallId: v || undefined })}
+            variables={availableVariables}
+            placeholder="Input a call ID or @variable"
+            minHeight={40}
           />
         </PanelField>
       )}
@@ -1899,22 +2227,26 @@ function GongPanel({
 
           {data.gongFilter === "by_rep" && (
             <PanelField label="Rep name">
-              <input
-                style={panelInputStyle}
-                placeholder="e.g. Jane Smith"
+              <WorkflowMentionTextarea
                 value={data.gongRep ?? ""}
-                onChange={(e) => onChange({ gongRep: e.target.value })}
+                onChange={(v) => onChange({ gongRep: v || undefined })}
+                variables={availableVariables}
+                placeholder="e.g. Jane Smith or @variable"
+                minHeight={40}
               />
             </PanelField>
           )}
 
           {data.gongFilter === "by_account" && (
             <PanelField label="Account / company name">
-              <input
-                style={panelInputStyle}
-                placeholder="e.g. Acme Corp"
+              <WorkflowMentionTextarea
                 value={data.gongAccount ?? ""}
-                onChange={(e) => onChange({ gongAccount: e.target.value })}
+                onChange={(v) =>
+                  onChange({ gongAccount: v || undefined })
+                }
+                variables={availableVariables}
+                placeholder="e.g. Acme Corp or @variable"
+                minHeight={40}
               />
             </PanelField>
           )}
@@ -1941,12 +2273,86 @@ function GongPanel({
   );
 }
 
-function ApolloPanel({
+function PipedrivePanel({
   data,
   onChange,
+  availableVariables,
+  outputType = "single",
+  agentId,
 }: {
   data: WorkflowNodeData;
   onChange: (patch: Partial<WorkflowNodeData>) => void;
+  availableVariables: WorkflowVariable[];
+  outputType?: "single" | "table";
+  agentId?: string | null;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <PanelField label="Name (required)">
+        <WorkflowMentionTextarea
+          value={data.pipedriveName ?? ""}
+          onChange={(v) => onChange({ pipedriveName: v || undefined })}
+          variables={availableVariables}
+          placeholder="Contact's full name or @variable"
+          minHeight={40}
+        />
+      </PanelField>
+      <PanelField label="Company (required)">
+        <WorkflowMentionTextarea
+          value={data.pipedriveCompany ?? ""}
+          onChange={(v) => onChange({ pipedriveCompany: v || undefined })}
+          variables={availableVariables}
+          placeholder="Company/org name (creates or finds org) or @variable"
+          minHeight={40}
+        />
+      </PanelField>
+      <PanelField label="Email (required)">
+        <WorkflowMentionTextarea
+          value={data.pipedriveEmail ?? ""}
+          onChange={(v) => onChange({ pipedriveEmail: v || undefined })}
+          variables={availableVariables}
+          placeholder="Contact's email address or @variable"
+          minHeight={40}
+        />
+      </PanelField>
+      <PanelField label="LinkedIn (optional)">
+        <WorkflowMentionTextarea
+          value={data.pipedriveLinkedin ?? ""}
+          onChange={(v) => onChange({ pipedriveLinkedin: v || undefined })}
+          variables={availableVariables}
+          placeholder="LinkedIn URL or @variable"
+          minHeight={40}
+        />
+      </PanelField>
+      {outputType === "table" ? (
+        <TableConfigurationSection
+          kind="connector"
+          data={data}
+          onChange={onChange}
+          agentId={agentId}
+        />
+      ) : (
+        <SaveOutputField
+          value={data.outputVariable}
+          onChange={(val) => onChange({ outputVariable: val })}
+        />
+      )}
+    </div>
+  );
+}
+
+function ApolloPanel({
+  data,
+  onChange,
+  availableVariables,
+  outputType = "single",
+  agentId,
+}: {
+  data: WorkflowNodeData;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+  availableVariables: WorkflowVariable[];
+  outputType?: "single" | "table";
+  agentId?: string | null;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -1963,6 +2369,9 @@ function ApolloPanel({
               apolloEmployeeRange: undefined,
               apolloPersonEmail: undefined,
               apolloPersonLinkedin: undefined,
+              apolloPersonFullName: undefined,
+              apolloPersonCompany: undefined,
+              apolloPrompt: undefined,
               apolloCompanyDomain: undefined,
             })
           }
@@ -1973,15 +2382,27 @@ function ApolloPanel({
           <SelectContent className="bg-[#09090b] border-[#3f3f46]">
             <SelectItem
               value="search_people"
-              className="text-[#fafafa] focus:bg-[#27272a]"
+              disabled
+              className="text-[#52525b] opacity-60"
             >
-              Search people
+              <span className="flex items-center gap-2">
+                Search people
+                <Badge variant="secondary" className="text-[9px]">
+                  Coming soon
+                </Badge>
+              </span>
             </SelectItem>
             <SelectItem
               value="search_companies"
-              className="text-[#fafafa] focus:bg-[#27272a]"
+              disabled
+              className="text-[#52525b] opacity-60"
             >
-              Search companies
+              <span className="flex items-center gap-2">
+                Search companies
+                <Badge variant="secondary" className="text-[9px]">
+                  Coming soon
+                </Badge>
+              </span>
             </SelectItem>
             <SelectItem
               value="enrich_person"
@@ -1991,9 +2412,15 @@ function ApolloPanel({
             </SelectItem>
             <SelectItem
               value="enrich_company"
-              className="text-[#fafafa] focus:bg-[#27272a]"
+              disabled
+              className="text-[#52525b] opacity-60"
             >
-              Enrich company
+              <span className="flex items-center gap-2">
+                Enrich company
+                <Badge variant="secondary" className="text-[9px]">
+                  Coming soon
+                </Badge>
+              </span>
             </SelectItem>
           </SelectContent>
         </Select>
@@ -2014,27 +2441,36 @@ function ApolloPanel({
             Filters
           </div>
           <PanelField label="Job title">
-            <input
-              style={panelInputStyle}
-              placeholder="e.g. Account Executive"
+            <WorkflowMentionTextarea
               value={data.apolloJobTitle ?? ""}
-              onChange={(e) => onChange({ apolloJobTitle: e.target.value })}
+              onChange={(v) =>
+                onChange({ apolloJobTitle: v || undefined })
+              }
+              variables={availableVariables}
+              placeholder="e.g. Account Executive or @variable"
+              minHeight={40}
             />
           </PanelField>
           <PanelField label="Company name">
-            <input
-              style={panelInputStyle}
-              placeholder="e.g. Acme Corp"
+            <WorkflowMentionTextarea
               value={data.apolloCompanyName ?? ""}
-              onChange={(e) => onChange({ apolloCompanyName: e.target.value })}
+              onChange={(v) =>
+                onChange({ apolloCompanyName: v || undefined })
+              }
+              variables={availableVariables}
+              placeholder="e.g. Acme Corp or @variable"
+              minHeight={40}
             />
           </PanelField>
           <PanelField label="Location">
-            <input
-              style={panelInputStyle}
-              placeholder="e.g. San Francisco, CA"
+            <WorkflowMentionTextarea
               value={data.apolloLocation ?? ""}
-              onChange={(e) => onChange({ apolloLocation: e.target.value })}
+              onChange={(v) =>
+                onChange({ apolloLocation: v || undefined })
+              }
+              variables={availableVariables}
+              placeholder="e.g. San Francisco, CA or @variable"
+              minHeight={40}
             />
           </PanelField>
         </>
@@ -2055,21 +2491,25 @@ function ApolloPanel({
             Filters
           </div>
           <PanelField label="Industry">
-            <input
-              style={panelInputStyle}
-              placeholder="e.g. SaaS, Healthcare"
+            <WorkflowMentionTextarea
               value={data.apolloIndustry ?? ""}
-              onChange={(e) => onChange({ apolloIndustry: e.target.value })}
+              onChange={(v) =>
+                onChange({ apolloIndustry: v || undefined })
+              }
+              variables={availableVariables}
+              placeholder="e.g. SaaS, Healthcare or @variable"
+              minHeight={40}
             />
           </PanelField>
           <PanelField label="Employee count range">
-            <input
-              style={panelInputStyle}
-              placeholder="e.g. 50-200"
+            <WorkflowMentionTextarea
               value={data.apolloEmployeeRange ?? ""}
-              onChange={(e) =>
-                onChange({ apolloEmployeeRange: e.target.value })
+              onChange={(v) =>
+                onChange({ apolloEmployeeRange: v || undefined })
               }
+              variables={availableVariables}
+              placeholder="e.g. 50-200 or @variable"
+              minHeight={40}
             />
           </PanelField>
         </>
@@ -2077,22 +2517,35 @@ function ApolloPanel({
 
       {data.apolloAction === "enrich_person" && (
         <>
-          <PanelField label="Email">
-            <input
-              style={panelInputStyle}
-              placeholder="e.g. jane@acme.com"
-              value={data.apolloPersonEmail ?? ""}
-              onChange={(e) => onChange({ apolloPersonEmail: e.target.value })}
+          <PanelField label="Full name">
+            <WorkflowMentionTextarea
+              value={data.apolloPersonFullName ?? ""}
+              onChange={(v) => onChange({ apolloPersonFullName: v || undefined })}
+              variables={availableVariables}
+              placeholder="e.g. Jane Smith or @variable"
+              minHeight={40}
             />
           </PanelField>
-          <PanelField label="LinkedIn URL">
-            <input
-              style={panelInputStyle}
-              placeholder="e.g. https://linkedin.com/in/jane"
-              value={data.apolloPersonLinkedin ?? ""}
-              onChange={(e) =>
-                onChange({ apolloPersonLinkedin: e.target.value })
+          <PanelField label="Company">
+            <WorkflowMentionTextarea
+              value={data.apolloPersonCompany ?? ""}
+              onChange={(v) =>
+                onChange({ apolloPersonCompany: v || undefined })
               }
+              variables={availableVariables}
+              placeholder="e.g. Acme Corp or @variable"
+              minHeight={40}
+            />
+          </PanelField>
+          <PanelField label="Prompt">
+            <WorkflowMentionTextarea
+              value={data.apolloPrompt ?? ""}
+              onChange={(v) =>
+                onChange({ apolloPrompt: v || undefined })
+              }
+              variables={availableVariables}
+              placeholder="Optional prompt for enrichment context…"
+              minHeight={80}
             />
           </PanelField>
         </>
@@ -2100,19 +2553,31 @@ function ApolloPanel({
 
       {data.apolloAction === "enrich_company" && (
         <PanelField label="Company domain">
-          <input
-            style={panelInputStyle}
-            placeholder="e.g. acme.com"
+          <WorkflowMentionTextarea
             value={data.apolloCompanyDomain ?? ""}
-            onChange={(e) => onChange({ apolloCompanyDomain: e.target.value })}
+            onChange={(v) =>
+              onChange({ apolloCompanyDomain: v || undefined })
+            }
+            variables={availableVariables}
+            placeholder="e.g. acme.com or @variable"
+            minHeight={40}
           />
         </PanelField>
       )}
 
-      <SaveOutputField
-        value={data.outputVariable}
-        onChange={(val) => onChange({ outputVariable: val })}
-      />
+      {outputType === "table" ? (
+        <TableConfigurationSection
+          kind="connector"
+          data={data}
+          onChange={onChange}
+          agentId={agentId}
+        />
+      ) : (
+        <SaveOutputField
+          value={data.outputVariable}
+          onChange={(val) => onChange({ outputVariable: val })}
+        />
+      )}
     </div>
   );
 }
@@ -2628,9 +3093,15 @@ function ConfluencePanel({
 function ConnectorPanel({
   data,
   onChange,
+  availableVariables,
+  outputType = "single",
+  agentId,
 }: {
   data: WorkflowNodeData;
   onChange: (patch: Partial<WorkflowNodeData>) => void;
+  availableVariables: WorkflowVariable[];
+  outputType?: "single" | "table";
+  agentId?: string | null;
 }) {
   const meta = data.connectorService
     ? CONNECTOR_META[data.connectorService]
@@ -2641,11 +3112,12 @@ function ConnectorPanel({
   const isConfluence = data.connectorService === "confluence";
   const isGong = data.connectorService === "gong";
   const isApollo = data.connectorService === "apollo";
+  const isPipedrive = data.connectorService === "pipedrive";
 
   return (
     <>
       {/* Service badge — only for generic/unknown connectors */}
-      {!isSlack && !isJira && !isConfluence && !isGong && !isApollo && (
+      {!isSlack && !isJira && !isConfluence && !isGong && !isApollo && !isPipedrive && (
         <PanelField label="Service">
           <div
             style={{
@@ -2674,62 +3146,153 @@ function ConnectorPanel({
 
       {/* Slack: tabbed UI */}
       {isSlack ? (
-        <Tabs defaultValue="read" className="w-full">
-          <TabsList className="w-full bg-[#09090b] border border-[#3f3f46] mb-4">
-            <TabsTrigger
-              value="read"
-              className="flex-1 data-[state=active]:bg-[#27272a] data-[state=active]:text-[#fafafa] text-[#71717a]"
-            >
-              Read messages
-            </TabsTrigger>
-            <TabsTrigger
-              value="send"
-              className="flex-1 data-[state=active]:bg-[#27272a] data-[state=active]:text-[#fafafa] text-[#71717a] gap-2"
-            >
-              Send messages
-              <Badge className="bg-[#2D47BC22] text-[#2D47BC] border border-[#2D47BC44] text-[9px] font-semibold px-1.5 py-0 leading-4 hover:bg-[#2D47BC22]">
-                Soon
-              </Badge>
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="read">
-            <SlackReadPanel data={data} onChange={onChange} />
-          </TabsContent>
-          <TabsContent value="send">
-            <SlackSendPanel />
-          </TabsContent>
-        </Tabs>
+        <>
+          <Tabs defaultValue="read" className="w-full">
+            <TabsList className="w-full bg-[#09090b] border border-[#3f3f46] mb-4">
+              <TabsTrigger
+                value="read"
+                className="flex-1 data-[state=active]:bg-[#27272a] data-[state=active]:text-[#fafafa] text-[#71717a]"
+              >
+                Read messages
+              </TabsTrigger>
+              <TabsTrigger
+                value="send"
+                className="flex-1 data-[state=active]:bg-[#27272a] data-[state=active]:text-[#fafafa] text-[#71717a] gap-2"
+              >
+                Send messages
+                <Badge className="bg-[#2D47BC22] text-[#2D47BC] border border-[#2D47BC44] text-[9px] font-semibold px-1.5 py-0 leading-4 hover:bg-[#2D47BC22]">
+                  Soon
+                </Badge>
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="read">
+              <SlackReadPanel data={data} onChange={onChange} />
+            </TabsContent>
+            <TabsContent value="send">
+              <SlackSendPanel />
+            </TabsContent>
+          </Tabs>
+          {outputType === "table" ? (
+            <TableConfigurationSection
+              kind="connector"
+              data={data}
+              onChange={onChange}
+              agentId={agentId}
+            />
+          ) : (
+            <SaveOutputField
+              value={data.outputVariable}
+              onChange={(val) => onChange({ outputVariable: val })}
+            />
+          )}
+        </>
       ) : isJira ? (
-        <JiraPanel data={data} onChange={onChange} />
+        <>
+          <JiraPanel data={data} onChange={onChange} />
+          {outputType === "table" ? (
+            <TableConfigurationSection
+              kind="connector"
+              data={data}
+              onChange={onChange}
+              agentId={agentId}
+            />
+          ) : (
+            <SaveOutputField
+              value={data.outputVariable}
+              onChange={(val) => onChange({ outputVariable: val })}
+            />
+          )}
+        </>
       ) : isConfluence ? (
-        <ConfluencePanel data={data} onChange={onChange} />
+        <>
+          <ConfluencePanel data={data} onChange={onChange} />
+          {outputType === "table" ? (
+            <TableConfigurationSection
+              kind="connector"
+              data={data}
+              onChange={onChange}
+              agentId={agentId}
+            />
+          ) : (
+            <SaveOutputField
+              value={data.outputVariable}
+              onChange={(val) => onChange({ outputVariable: val })}
+            />
+          )}
+        </>
       ) : isGong ? (
-        <GongPanel data={data} onChange={onChange} />
+        <>
+          <GongPanel
+            data={data}
+            onChange={onChange}
+            availableVariables={availableVariables}
+          />
+          {outputType === "table" ? (
+            <TableConfigurationSection
+              kind="connector"
+              data={data}
+              onChange={onChange}
+              agentId={agentId}
+            />
+          ) : (
+            <SaveOutputField
+              value={data.outputVariable}
+              onChange={(val) => onChange({ outputVariable: val })}
+            />
+          )}
+        </>
       ) : isApollo ? (
-        <ApolloPanel data={data} onChange={onChange} />
+        <ApolloPanel
+          data={data}
+          onChange={onChange}
+          availableVariables={availableVariables}
+          outputType={outputType}
+          agentId={agentId}
+        />
+      ) : isPipedrive ? (
+        <PipedrivePanel
+          data={data}
+          onChange={onChange}
+          availableVariables={availableVariables}
+          outputType={outputType}
+          agentId={agentId}
+        />
       ) : (
         /* Generic connector fallback */
         <>
           <PanelField label="Action">
-            <input
-              style={panelInputStyle}
-              placeholder="e.g. post_message, create_page…"
+            <WorkflowMentionTextarea
               value={data.connectorAction ?? ""}
-              onChange={(e) => onChange({ connectorAction: e.target.value })}
+              onChange={(v) =>
+                onChange({ connectorAction: v || undefined })
+              }
+              variables={availableVariables}
+              placeholder="e.g. post_message, create_page… or @variable"
+              minHeight={40}
             />
           </PanelField>
           <PanelField label="Description">
-            <textarea
-              style={panelTextareaStyle}
-              placeholder="What does this connector do?"
+            <WorkflowMentionTextarea
               value={data.description ?? ""}
-              onChange={(e) => onChange({ description: e.target.value })}
+              onChange={(v) => onChange({ description: v || undefined })}
+              variables={availableVariables}
+              placeholder="What does this connector do?"
+              minHeight={80}
             />
           </PanelField>
-          <SaveOutputField
-            value={data.outputVariable}
-            onChange={(val) => onChange({ outputVariable: val })}
-          />
+          {outputType === "table" ? (
+            <TableConfigurationSection
+              kind="connector"
+              data={data}
+              onChange={onChange}
+              agentId={agentId}
+            />
+          ) : (
+            <SaveOutputField
+              value={data.outputVariable}
+              onChange={(val) => onChange({ outputVariable: val })}
+            />
+          )}
         </>
       )}
     </>
@@ -3131,8 +3694,12 @@ function EvalPanel({
     const vars: WorkflowVariable[] = [];
     if (n.data.outputVariable)
       vars.push({ name: n.data.outputVariable, kind: "output", nodeLabel: n.data.label });
-    if (n.data.requiresInputVariable && n.data.inputVariableName)
-      vars.push({ name: n.data.inputVariableName, kind: "input", nodeLabel: n.data.label });
+    if (n.data.requiresInputVariable) {
+      for (const key of ["inputVariableName", "inputVariableName2", "inputVariableName3", "inputVariableName4", "inputVariableName5"] as const) {
+        const name = n.data[key];
+        if (name) vars.push({ name, kind: "input", nodeLabel: n.data.label });
+      }
+    }
     return vars;
   });
 
@@ -3349,6 +3916,926 @@ function ForReviewPanel({
           variables={availableVariables}
           placeholder="What should the reviewer check for?"
           minHeight={100}
+        />
+      </PanelField>
+      <SaveOutputField
+        value={data.outputVariable}
+        onChange={(val) => onChange({ outputVariable: val })}
+      />
+    </>
+  );
+}
+
+function WebsitePanel({
+  data,
+  onChange,
+  availableVariables,
+  outputType = "single",
+  agentId,
+}: {
+  data: WorkflowNodeData;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+  availableVariables: WorkflowVariable[];
+  outputType?: "single" | "table";
+  agentId?: string | null;
+}) {
+  return (
+    <>
+      <PanelField label="URL">
+        <WorkflowMentionTextarea
+          value={data.websiteUrl ?? ""}
+          onChange={(v) => onChange({ websiteUrl: v })}
+          variables={availableVariables}
+          placeholder="https://example.com/@my_variable"
+          minHeight={44}
+        />
+      </PanelField>
+      <PanelField label="Prompt">
+        <WorkflowMentionTextarea
+          value={data.websitePrompt ?? ""}
+          onChange={(v) => onChange({ websitePrompt: v })}
+          variables={availableVariables}
+          placeholder="What should the website extractor do?"
+          minHeight={110}
+        />
+      </PanelField>
+      {outputType === "table" ? (
+        <TableConfigurationSection
+          kind="website"
+          data={data}
+          onChange={onChange}
+          agentId={agentId}
+        />
+      ) : (
+        <SaveOutputField
+          value={data.outputVariable}
+          onChange={(val) => onChange({ outputVariable: val })}
+        />
+      )}
+    </>
+  );
+}
+
+const DEEP_RESEARCH_PROVIDERS = [
+  { value: "perplexity_deep_research" as const, label: "Perplexity Deep Research" },
+  { value: "perplexity_sonar_pro" as const, label: "Perplexity Sonar Pro" },
+  { value: "openai_deep_research" as const, label: "OpenAI Deep Research" },
+];
+
+function DeepResearchPanel({
+  data,
+  onChange,
+  availableVariables,
+  outputType = "single",
+  agentId,
+}: {
+  data: WorkflowNodeData;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+  availableVariables: WorkflowVariable[];
+  outputType?: "single" | "table";
+  agentId?: string | null;
+}) {
+  return (
+    <>
+      <PanelField label="Model">
+        <Select
+          value={data.deepResearchProvider ?? "perplexity_deep_research"}
+          onValueChange={(val: "perplexity_deep_research" | "perplexity_sonar_pro" | "openai_deep_research") =>
+            onChange({ deepResearchProvider: val })
+          }
+        >
+          <SelectTrigger className="w-full bg-[#09090b] border-[#3f3f46] text-[#fafafa] hover:bg-[#09090b] focus:ring-0 focus:ring-offset-0">
+            <SelectValue placeholder="Select provider" />
+          </SelectTrigger>
+          <SelectContent className="bg-[#18181b] border-[#27272a] text-[#fafafa]">
+            {DEEP_RESEARCH_PROVIDERS.map((opt) => (
+              <SelectItem
+                key={opt.value}
+                value={opt.value}
+                className="focus:bg-[#27272a] focus:text-[#fafafa]"
+              >
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </PanelField>
+      <PanelField label="Prompt">
+        <WorkflowMentionTextarea
+          value={data.deepResearchPrompt ?? ""}
+          onChange={(v) => onChange({ deepResearchPrompt: v })}
+          variables={availableVariables}
+          placeholder="Type @ to reference a variable…"
+          minHeight={120}
+        />
+      </PanelField>
+      {outputType === "table" ? (
+        <TableConfigurationSection
+          kind="deepResearch"
+          data={data}
+          onChange={onChange}
+          agentId={agentId}
+        />
+      ) : (
+        <SaveOutputField
+          value={data.outputVariable}
+          onChange={(val) => onChange({ outputVariable: val })}
+        />
+      )}
+    </>
+  );
+}
+
+const AGENTIC_SEARCH_ENGINES = [
+  { value: "firecrawl" as const, label: "Firecrawl" },
+  { value: "perplexity" as const, label: "Perplexity" },
+];
+
+const AGENTIC_SEARCH_SOURCES = [
+  { value: "web" as const, label: "Web" },
+  { value: "news" as const, label: "News" },
+];
+
+function AgenticSearchPanel({
+  data,
+  onChange,
+  availableVariables,
+  outputType = "single",
+  agentId,
+}: {
+  data: WorkflowNodeData;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+  availableVariables: WorkflowVariable[];
+  outputType?: "single" | "table";
+  agentId?: string | null;
+}) {
+  const sources = data.agenticSearchSources ?? [];
+  const toggleSource = (source: "web" | "news") => {
+    const next = sources.includes(source)
+      ? sources.filter((s) => s !== source)
+      : [...sources, source];
+    onChange({ agenticSearchSources: next });
+  };
+
+  return (
+    <>
+      <PanelField label="Query (required)">
+        <WorkflowMentionTextarea
+          value={data.agenticSearchQuery ?? ""}
+          onChange={(v) => onChange({ agenticSearchQuery: v })}
+          variables={availableVariables}
+          placeholder="Type @ to reference a variable…"
+          minHeight={80}
+        />
+      </PanelField>
+      <PanelField label="Select engine">
+        <Select
+          value={(data.engine ?? data.agenticSearchEngine) ?? "firecrawl"}
+          onValueChange={(v) =>
+            onChange({ engine: v as "firecrawl" | "perplexity" })
+          }
+        >
+          <SelectTrigger className="w-full bg-[#09090b] border-[#3f3f46] text-[#fafafa] hover:bg-[#09090b] focus:ring-0 focus:ring-offset-0">
+            <SelectValue placeholder="Select engine" />
+          </SelectTrigger>
+          <SelectContent className="bg-[#18181b] border-[#27272a] text-[#fafafa]">
+            {AGENTIC_SEARCH_ENGINES.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </PanelField>
+      <PanelField label="Sources (optional)">
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              style={{
+                ...panelInputStyle,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                cursor: "pointer",
+              }}
+            >
+              <span>
+                {sources.length === 0
+                  ? "Select sources…"
+                  : sources.map((s) => AGENTIC_SEARCH_SOURCES.find((o) => o.value === s)?.label ?? s).join(", ")}
+              </span>
+              <ChevronDown size={14} style={{ opacity: 0.7 }} />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            className="w-[var(--radix-popover-trigger-width)] bg-[#18181b] border-[#27272a] text-[#fafafa] p-2"
+            align="start"
+          >
+            {AGENTIC_SEARCH_SOURCES.map((opt) => (
+              <label
+                key={opt.value}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                }}
+                className="hover:bg-[#27272a]"
+              >
+                <Checkbox
+                  checked={sources.includes(opt.value)}
+                  onCheckedChange={() => toggleSource(opt.value)}
+                />
+                <span style={{ fontSize: 13 }}>{opt.label}</span>
+              </label>
+            ))}
+          </PopoverContent>
+        </Popover>
+      </PanelField>
+      <PanelField label="Website (optional)">
+        <WorkflowMentionTextarea
+          value={data.agenticSearchWebsite ?? ""}
+          onChange={(v) => onChange({ agenticSearchWebsite: v })}
+          variables={availableVariables}
+          placeholder="https://… or type @ to reference a variable…"
+          minHeight={44}
+        />
+      </PanelField>
+      <PanelField label="Related domain (optional)">
+        <WorkflowMentionTextarea
+          value={data.agenticSearchRelatedDomain ?? ""}
+          onChange={(v) => onChange({ agenticSearchRelatedDomain: v })}
+          variables={availableVariables}
+          placeholder="e.g. example.com or type @ to reference a variable…"
+          minHeight={60}
+        />
+      </PanelField>
+      <PanelField label="Number of results (optional)">
+        <input
+          type="number"
+          min={1}
+          max={100}
+          step={1}
+          style={panelInputStyle}
+          placeholder="e.g. 10"
+          value={data.agentSearchLimit ?? ""}
+          onChange={(e) => onChange({ agentSearchLimit: e.target.value })}
+        />
+      </PanelField>
+      {outputType === "table" ? (
+        <TableConfigurationSection
+          kind="agenticSearch"
+          data={data}
+          onChange={onChange}
+          agentId={agentId}
+        />
+      ) : (
+        <SaveOutputField
+          value={data.outputVariable}
+          onChange={(val) => onChange({ outputVariable: val })}
+        />
+      )}
+    </>
+  );
+}
+
+const TABLE_COLUMN_EXCLUDE = "exclude";
+const TABLE_COLUMN_ADD = "__add_column__";
+
+type TableColumn = { key: string; label: string };
+
+const AGENTIC_SEARCH_TABLE_FIELDS = {
+  url: { label: "URL" },
+  title: { label: "Title" },
+  description: { label: "Description" },
+  position: { label: "Position" },
+  snippet: { label: "Snippet" },
+  date: { label: "Date" },
+  last_updated: { label: "Last updated" },
+} as const;
+
+function AgenticSearchTableConfigFields({
+  data,
+  onChange,
+  fields,
+  columns,
+  onAddColumnRequest,
+}: {
+  data: WorkflowNodeData;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+  fields: ReadonlyArray<keyof typeof AGENTIC_SEARCH_TABLE_FIELDS>;
+  columns: TableColumn[];
+  onAddColumnRequest: (fieldKey: keyof typeof AGENTIC_SEARCH_TABLE_FIELDS) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        marginTop: 12,
+      }}
+    >
+      {fields.map((fieldKey) => {
+        const { label } = AGENTIC_SEARCH_TABLE_FIELDS[fieldKey];
+        const value =
+          data.columnMappings?.find((m) => m.field === fieldKey)?.column ?? "";
+
+        const handleChange = (v: string) => {
+          if (v === TABLE_COLUMN_ADD) {
+            onAddColumnRequest(fieldKey);
+          } else {
+            const others = (data.columnMappings ?? []).filter(
+              (m) => m.field !== fieldKey
+            );
+            onChange({
+              columnMappings: [...others, { field: fieldKey, column: v }],
+            });
+          }
+        };
+
+        return (
+          <div
+            key={fieldKey}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              justifyContent: "space-between",
+            }}
+          >
+            <span
+              style={{
+                fontSize: 13,
+                color: "#e4e4e7",
+                flexShrink: 0,
+              }}
+            >
+              {label}
+            </span>
+            <Select value={value || undefined} onValueChange={handleChange}>
+              <SelectTrigger
+                className="w-[160px] bg-[#09090b] border-[#3f3f46] text-[#fafafa] hover:bg-[#09090b] focus:ring-0 shrink-0"
+                style={{ minWidth: 140 }}
+              >
+                <SelectValue placeholder="Select column…" />
+              </SelectTrigger>
+              <SelectContent
+                className="bg-[#18181b] border-[#27272a] text-[#fafafa]"
+                align="end"
+              >
+                <SelectItem
+                  value={TABLE_COLUMN_ADD}
+                  className="focus:bg-[#27272a] focus:text-[#fafafa]"
+                >
+                  Add column
+                </SelectItem>
+                <SelectSeparator className="bg-[#3f3f46]" />
+                {columns.map((col) => (
+                  <SelectItem
+                    key={col.key}
+                    value={col.key}
+                    className="focus:bg-[#27272a] focus:text-[#fafafa]"
+                  >
+                    {col.label}
+                  </SelectItem>
+                ))}
+                <SelectSeparator className="bg-[#3f3f46]" />
+                <SelectItem
+                  value={TABLE_COLUMN_EXCLUDE}
+                  className="focus:bg-[#27272a] focus:text-[#fafafa]"
+                >
+                  Exclude
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AgenticSearchTableConfig({
+  data,
+  onChange,
+  agentId,
+}: {
+  data: WorkflowNodeData;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+  agentId?: string | null;
+}) {
+  const [columns, setColumns] = useState<TableColumn[]>([]);
+  const [columnsLoading, setColumnsLoading] = useState(false);
+  const [addColumnOpen, setAddColumnOpen] = useState(false);
+  const [addColumnForField, setAddColumnForField] = useState<
+    keyof typeof AGENTIC_SEARCH_TABLE_FIELDS | null
+  >(null);
+  const [newColumnName, setNewColumnName] = useState("");
+  const [isAdding, setIsAdding] = useState(false);
+
+  const engine = data.engine ?? data.agenticSearchEngine ?? "firecrawl";
+  const sources = data.agenticSearchSources ?? [];
+  const hasWeb = sources.includes("web");
+  const hasNews = sources.includes("news");
+
+  // Perplexity: title, url, snippet, date, last_updated
+  // Firecrawl: web-only (url, title, description, position) | news (title, url, snippet, date, position) | both (all unique)
+  const fields: ReadonlyArray<keyof typeof AGENTIC_SEARCH_TABLE_FIELDS> =
+    engine === "perplexity"
+      ? ["title", "url", "snippet", "date", "last_updated"]
+      : hasWeb && hasNews
+        ? ["url", "title", "description", "snippet", "date", "position"]
+        : hasNews
+          ? ["title", "url", "snippet", "date", "position"]
+          : hasWeb
+            ? ["url", "title", "description", "position"]
+            : ["url", "title", "description", "position"];
+
+  const fetchColumns = useCallback(async () => {
+    const user = auth.currentUser;
+    if (!user || !agentId) return;
+    setColumnsLoading(true);
+    try {
+      const res = await fetch("/api/workflow/version/get-table-columns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.uid,
+          agent_id: agentId,
+        }),
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      const cols = json.columns ?? json.tableColumns ?? [];
+      setColumns(
+        Array.isArray(cols)
+          ? cols.map((c: { key?: string; label?: string }) => ({
+              key: c.key ?? String(c),
+              label: c.label ?? c.key ?? String(c),
+            }))
+          : []
+      );
+    } catch (err) {
+      console.error("Failed to fetch table columns:", err);
+    } finally {
+      setColumnsLoading(false);
+    }
+  }, [agentId]);
+
+  useEffect(() => {
+    if (agentId) fetchColumns();
+  }, [agentId, fetchColumns]);
+
+  const handleAddColumnRequest = useCallback(
+    (fieldKey: keyof typeof AGENTIC_SEARCH_TABLE_FIELDS) => {
+      setAddColumnForField(fieldKey);
+      setNewColumnName("");
+      setAddColumnOpen(true);
+    },
+    []
+  );
+
+  const handleAddColumnSubmit = useCallback(async () => {
+    const user = auth.currentUser;
+    const fieldKey = addColumnForField;
+    const name = newColumnName.trim();
+    if (!user || !agentId || !fieldKey || !name) return;
+
+    const key = name.toLowerCase().replace(/\s+/g, "_");
+    const label = name;
+
+    setIsAdding(true);
+    try {
+      const nextColumns = [...columns, { key, label }];
+      const res = await fetch("/api/workflow/version/update-table-columns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.uid,
+          agent_id: agentId,
+          tableColumns: nextColumns,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to add column");
+      setColumns(nextColumns);
+      const others = (data.columnMappings ?? []).filter(
+        (m) => m.field !== fieldKey
+      );
+      onChange({
+        columnMappings: [...others, { field: fieldKey, column: key }],
+      });
+      setAddColumnOpen(false);
+      setAddColumnForField(null);
+      toast.success(`Column "${label}" added`);
+    } catch (err) {
+      console.error("Failed to add column:", err);
+      toast.error("Failed to add column. Please try again.");
+    } finally {
+      setIsAdding(false);
+    }
+  }, [agentId, addColumnForField, columns, data, newColumnName, onChange]);
+
+  if (!agentId) {
+    return (
+      <AgenticSearchTableConfigFields
+        data={data}
+        onChange={onChange}
+        fields={fields}
+        columns={[]}
+        onAddColumnRequest={() => {}}
+      />
+    );
+  }
+
+  if (columnsLoading) {
+    return (
+      <div style={{ marginTop: 12 }}>
+        <Skeleton className="h-20 w-full bg-zinc-800" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <AgenticSearchTableConfigFields
+        data={data}
+        onChange={onChange}
+        fields={fields}
+        columns={columns}
+        onAddColumnRequest={handleAddColumnRequest}
+      />
+      <AlertDialog open={addColumnOpen} onOpenChange={setAddColumnOpen}>
+        <AlertDialogContent className="bg-[#18181b] border-[#27272a] text-[#fafafa]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Enter new column name</AlertDialogTitle>
+          </AlertDialogHeader>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Input
+              className="bg-[#09090b] border-[#3f3f46] text-[#fafafa] placeholder:text-[#71717a]"
+              placeholder="e.g. Company Name"
+              value={newColumnName}
+              onChange={(e) => setNewColumnName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAddColumnSubmit();
+                }
+              }}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-transparent border-[#3f3f46] text-[#a1a1aa] hover:bg-[#27272a] hover:text-[#fafafa]">
+              Cancel
+            </AlertDialogCancel>
+            <Button
+              onClick={handleAddColumnSubmit}
+              disabled={!newColumnName.trim() || isAdding}
+              style={{
+                background: "#2D47BC",
+                color: "#fff",
+                border: "none",
+              }}
+            >
+              {isAdding && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Add
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+/** Single output column config — same dropdown with fetch columns / add column as search panels. */
+function SingleOutputColumnTableConfig({
+  data,
+  onChange,
+  agentId,
+}: {
+  data: WorkflowNodeData;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+  agentId?: string | null;
+}) {
+  const [columns, setColumns] = useState<TableColumn[]>([]);
+  const [columnsLoading, setColumnsLoading] = useState(false);
+  const [addColumnOpen, setAddColumnOpen] = useState(false);
+  const [newColumnName, setNewColumnName] = useState("");
+  const [isAdding, setIsAdding] = useState(false);
+
+  const value = data.tableOutputColumn ?? "";
+
+  const fetchColumns = useCallback(async () => {
+    const user = auth.currentUser;
+    if (!user || !agentId) return;
+    setColumnsLoading(true);
+    try {
+      const res = await fetch("/api/workflow/version/get-table-columns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.uid,
+          agent_id: agentId,
+        }),
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      const cols = json.columns ?? json.tableColumns ?? [];
+      setColumns(
+        Array.isArray(cols)
+          ? cols.map((c: { key?: string; label?: string }) => ({
+              key: c.key ?? String(c),
+              label: c.label ?? c.key ?? String(c),
+            }))
+          : []
+      );
+    } catch (err) {
+      console.error("Failed to fetch table columns:", err);
+    } finally {
+      setColumnsLoading(false);
+    }
+  }, [agentId]);
+
+  useEffect(() => {
+    if (agentId) fetchColumns();
+  }, [agentId, fetchColumns]);
+
+  const handleAddColumnSubmit = useCallback(async () => {
+    const user = auth.currentUser;
+    const name = newColumnName.trim();
+    if (!user || !agentId || !name) return;
+
+    const key = name.toLowerCase().replace(/\s+/g, "_");
+    const label = name;
+
+    setIsAdding(true);
+    try {
+      const nextColumns = [...columns, { key, label }];
+      const res = await fetch("/api/workflow/version/update-table-columns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.uid,
+          agent_id: agentId,
+          tableColumns: nextColumns,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to add column");
+      setColumns(nextColumns);
+      onChange({ tableOutputColumn: key });
+      setAddColumnOpen(false);
+      setNewColumnName("");
+      toast.success(`Column "${label}" added`);
+    } catch (err) {
+      console.error("Failed to add column:", err);
+      toast.error("Failed to add column. Please try again.");
+    } finally {
+      setIsAdding(false);
+    }
+  }, [agentId, columns, newColumnName, onChange]);
+
+  const handleChange = (v: string) => {
+    if (v === TABLE_COLUMN_ADD) {
+      setAddColumnOpen(true);
+    } else {
+      onChange({ tableOutputColumn: v === TABLE_COLUMN_EXCLUDE ? "" : v });
+    }
+  };
+
+  if (!agentId) {
+    return (
+      <div style={{ marginTop: 12 }}>
+        <PanelField label="Output column">
+          <input
+            style={{
+              ...panelInputStyle,
+              fontFamily: "var(--font-geist-mono), monospace",
+            }}
+            placeholder="e.g. output"
+            value={value}
+            onChange={(e) =>
+              onChange({
+                tableOutputColumn: sanitizeVariableName(e.target.value),
+              })
+            }
+          />
+        </PanelField>
+      </div>
+    );
+  }
+
+  if (columnsLoading) {
+    return (
+      <div style={{ marginTop: 12 }}>
+        <Skeleton className="h-12 w-full bg-zinc-800" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div style={{ marginTop: 12 }}>
+        <PanelField label="Output column">
+          <Select value={value || undefined} onValueChange={handleChange}>
+            <SelectTrigger
+              className="w-full bg-[#09090b] border-[#3f3f46] text-[#fafafa] hover:bg-[#09090b] focus:ring-0"
+              style={{ minWidth: 140 }}
+            >
+              <SelectValue placeholder="Select column…" />
+            </SelectTrigger>
+            <SelectContent
+              className="bg-[#18181b] border-[#27272a] text-[#fafafa]"
+              align="end"
+            >
+              <SelectItem
+                value={TABLE_COLUMN_ADD}
+                className="focus:bg-[#27272a] focus:text-[#fafafa]"
+              >
+                Add column
+              </SelectItem>
+              <SelectSeparator className="bg-[#3f3f46]" />
+              {columns.map((col) => (
+                <SelectItem
+                  key={col.key}
+                  value={col.key}
+                  className="focus:bg-[#27272a] focus:text-[#fafafa]"
+                >
+                  {col.label}
+                </SelectItem>
+              ))}
+              <SelectSeparator className="bg-[#3f3f46]" />
+              <SelectItem
+                value={TABLE_COLUMN_EXCLUDE}
+                className="focus:bg-[#27272a] focus:text-[#fafafa]"
+              >
+                Exclude
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </PanelField>
+      </div>
+      <AlertDialog open={addColumnOpen} onOpenChange={setAddColumnOpen}>
+        <AlertDialogContent className="bg-[#18181b] border-[#27272a] text-[#fafafa]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Enter new column name</AlertDialogTitle>
+          </AlertDialogHeader>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <Input
+              className="bg-[#09090b] border-[#3f3f46] text-[#fafafa] placeholder:text-[#71717a]"
+              placeholder="e.g. Company Name"
+              value={newColumnName}
+              onChange={(e) => setNewColumnName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAddColumnSubmit();
+                }
+              }}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-transparent border-[#3f3f46] text-[#a1a1aa] hover:bg-[#27272a] hover:text-[#fafafa]">
+              Cancel
+            </AlertDialogCancel>
+            <Button
+              onClick={handleAddColumnSubmit}
+              disabled={!newColumnName.trim() || isAdding}
+              style={{
+                background: "#2D47BC",
+                color: "#fff",
+                border: "none",
+              }}
+            >
+              {isAdding && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Add
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+/** Shared wrapper for table-output workflows. Renders common header/description and node-specific config based on kind. */
+function TableConfigurationSection({
+  kind,
+  data,
+  onChange,
+  agentId,
+}: {
+  kind: NodeKind;
+  data: WorkflowNodeData;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+  agentId?: string | null;
+}) {
+  const renderNodeConfig = () => {
+    switch (kind) {
+      case "agenticSearch":
+        return (
+          <AgenticSearchTableConfig
+            data={data}
+            onChange={onChange}
+            agentId={agentId}
+          />
+        );
+      case "deepResearch":
+      case "llm":
+      case "connector":
+      case "website":
+        return (
+          <SingleOutputColumnTableConfig
+            data={data}
+            onChange={onChange}
+            agentId={agentId}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <>
+      <Separator className="bg-[#27272a] my-2" />
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+          paddingBottom: 8,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: "#71717a",
+            letterSpacing: "0.04em",
+            textTransform: "uppercase",
+          }}
+        >
+          Table configuration
+        </span>
+        <p
+          style={{
+            fontSize: 12,
+            color: "#71717a",
+            lineHeight: 1.4,
+          }}
+        >
+          Configure how this node contributes to the output table.
+        </p>
+        {renderNodeConfig()}
+      </div>
+    </>
+  );
+}
+
+function EmailPanel({
+  data,
+  onChange,
+  availableVariables,
+}: {
+  data: WorkflowNodeData;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+  availableVariables: WorkflowVariable[];
+}) {
+  return (
+    <>
+      <PanelField label="To">
+        <input
+          style={panelInputStyle}
+          placeholder="recipient@example.com"
+          value={data.emailTo ?? ""}
+          onChange={(e) => onChange({ emailTo: e.target.value })}
+        />
+      </PanelField>
+      <PanelField label="From">
+        <input
+          style={panelInputStyle}
+          placeholder="sender@example.com"
+          value={data.emailFrom ?? ""}
+          onChange={(e) => onChange({ emailFrom: e.target.value })}
+        />
+      </PanelField>
+      <PanelField label="Subject">
+        <input
+          style={panelInputStyle}
+          placeholder="Email subject"
+          value={data.emailSubject ?? ""}
+          onChange={(e) => onChange({ emailSubject: e.target.value })}
+        />
+      </PanelField>
+      <PanelField label="Body">
+        <WorkflowMentionTextarea
+          value={data.emailBody ?? ""}
+          onChange={(v) => onChange({ emailBody: v })}
+          variables={availableVariables}
+          placeholder="Write the email body..."
+          minHeight={120}
         />
       </PanelField>
       <SaveOutputField
@@ -3590,12 +5077,18 @@ function NodeInspectorPanel({
   onSave,
   onDelete,
   allNodes,
+  agentId,
+  outputType = "single",
+  tableColumns = [],
 }: {
   node: Node<WorkflowNodeData>;
   onChange: (patch: Partial<WorkflowNodeData>) => void;
   onSave: (patch: Partial<WorkflowNodeData>) => Promise<boolean>;
   onDelete: () => void;
   allNodes: Node<WorkflowNodeData>[];
+  agentId?: string | null;
+  outputType?: "single" | "table";
+  tableColumns?: { key: string; label: string }[];
 }) {
   const { kind } = node.data;
   const styles = KIND_STYLES[kind];
@@ -3603,19 +5096,43 @@ function NodeInspectorPanel({
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  const availableVariables: WorkflowVariable[] = allNodes
-    .flatMap((n) => {
-      const vars: WorkflowVariable[] = [];
-      // Only include other nodes' outputs — you can't reference your own output in your own prompt
-      if (n.id !== node.id && n.data.outputVariable)
-        vars.push({ name: n.data.outputVariable, kind: "output", nodeLabel: n.data.label });
-      // Include all nodes' input variables, including the current node's own input variable
-      if (n.data.requiresInputVariable && n.data.inputVariableName)
-        vars.push({ name: n.data.inputVariableName, kind: "input", nodeLabel: n.data.label });
-      return vars;
-    });
+  const tableColumnVars: WorkflowVariable[] =
+    tableColumns.length > 0
+      ? tableColumns.map((col) => ({
+          name: col.key,
+          kind: "column" as const,
+          nodeLabel: col.label,
+        }))
+      : [];
+
+  const nodeVars = allNodes.flatMap((n) => {
+    const vars: WorkflowVariable[] = [];
+    if (n.id !== node.id && n.data.outputVariable)
+      vars.push({ name: n.data.outputVariable, kind: "output", nodeLabel: n.data.label });
+    if (n.data.requiresInputVariable) {
+      for (const key of ["inputVariableName", "inputVariableName2", "inputVariableName3", "inputVariableName4", "inputVariableName5"] as const) {
+        const name = n.data[key];
+        if (name) vars.push({ name, kind: "input", nodeLabel: n.data.label });
+      }
+    }
+    return vars;
+  });
+
+  // Table columns first so they appear prominently in the @ menu
+  const availableVariables: WorkflowVariable[] = [...tableColumnVars, ...nodeVars];
 
   const handleSave = async () => {
+    if (kind === "agenticSearch") {
+      const limitVal = node.data.agentSearchLimit?.trim();
+      if (limitVal !== undefined && limitVal !== "") {
+        const num = Number(limitVal);
+        if (isNaN(num) || num < 1 || num > 100 || !Number.isInteger(num)) {
+          toast.error("Number of results must be between 1 and 100");
+          return;
+        }
+      }
+    }
+
     setIsSaving(true);
     setSaveSuccess(false);
     const ok = await onSave({});
@@ -3677,9 +5194,17 @@ function NodeInspectorPanel({
           }}
         />
 
-        {/* Requires input variable (all except trigger, eval, forReview) */}
-        {kind !== "trigger" && kind !== "eval" && kind !== "forReview" && (
-          <RequiresInputVariableField data={node.data} onChange={onChange} />
+        {/* Requires input variable (all except trigger, eval, forReview, email) */}
+        {kind !== "trigger" &&
+          kind !== "eval" &&
+          kind !== "forReview" &&
+          kind !== "email" && (
+          <RequiresInputVariableField
+            data={node.data}
+            onChange={onChange}
+            agentId={agentId}
+            nodeId={node.id}
+          />
         )}
 
         {/* Kind-specific fields */}
@@ -3687,10 +5212,50 @@ function NodeInspectorPanel({
           <TriggerPanel data={node.data} onChange={onChange} />
         )}
         {kind === "llm" && (
-          <LLMPanel data={node.data} onChange={onChange} onSave={onSave} availableVariables={availableVariables} />
+          <LLMPanel
+            data={node.data}
+            onChange={onChange}
+            onSave={onSave}
+            availableVariables={availableVariables}
+            outputType={outputType}
+            agentId={agentId}
+          />
         )}
         {kind === "connector" && (
-          <ConnectorPanel data={node.data} onChange={onChange} />
+          <ConnectorPanel
+            data={node.data}
+            onChange={onChange}
+            availableVariables={availableVariables}
+            outputType={outputType}
+            agentId={agentId}
+          />
+        )}
+        {kind === "website" && (
+          <WebsitePanel
+            data={node.data}
+            onChange={onChange}
+            availableVariables={availableVariables}
+            outputType={outputType}
+            agentId={agentId}
+          />
+        )}
+        {kind === "deepResearch" && (
+          <DeepResearchPanel
+            data={node.data}
+            onChange={onChange}
+            availableVariables={availableVariables}
+            outputType={outputType}
+            agentId={agentId}
+          />
+        )}
+        {kind === "agenticSearch" && (
+          <AgenticSearchPanel
+            data={node.data}
+            onChange={onChange}
+            availableVariables={availableVariables}
+            outputType={outputType}
+            agentId={agentId}
+          />
         )}
         {kind === "eval" && (
           <EvalPanel
@@ -3703,6 +5268,13 @@ function NodeInspectorPanel({
         )}
         {kind === "forReview" && (
           <ForReviewPanel data={node.data} onChange={onChange} availableVariables={availableVariables} />
+        )}
+        {kind === "email" && (
+          <EmailPanel
+            data={node.data}
+            onChange={onChange}
+            availableVariables={availableVariables}
+          />
         )}
         {kind === "action" && (
           <ActionPanel data={node.data} onChange={onChange} availableVariables={availableVariables} />
@@ -3874,6 +5446,8 @@ export function RunWorkflow({
   const nodeIdRef = useRef(initialNodes.length + 1);
 
   const [isPanelLoading, setIsPanelLoading] = useState(false);
+  const [outputType, setOutputType] = useState<"single" | "table">("single");
+  const [tableColumns, setTableColumns] = useState<{ key: string; label: string }[]>([]);
 
   const updateInspectedNode = useCallback(
     (patch: Partial<WorkflowNodeData>) => {
@@ -3891,16 +5465,18 @@ export function RunWorkflow({
     [inspectedNode],
   );
 
-  // Fetch node data from backend whenever a node is opened in the panel
+  // Fetch node data and table columns whenever a node is opened in the panel.
+  // Table columns use the same get-table-columns call as the table config dropdown.
   useEffect(() => {
     if (!inspectedNode || !agentId) return;
 
     const nodeId = inspectedNode.id;
+    const user = auth.currentUser;
+    if (!user) return;
+
+    let cancelled = false;
 
     const fetchNodeData = async () => {
-      const user = auth.currentUser;
-      if (!user) return;
-
       setIsPanelLoading(true);
       try {
         const res = await fetch("/api/workflow/get-node", {
@@ -3913,7 +5489,7 @@ export function RunWorkflow({
           }),
         });
 
-        if (!res.ok) return;
+        if (cancelled || !res.ok) return;
         const json = await res.json();
 
         if (json.success && json.data) {
@@ -3926,13 +5502,43 @@ export function RunWorkflow({
           );
         }
       } catch (error) {
-        console.error("Failed to fetch node data:", error);
+        if (!cancelled) console.error("Failed to fetch node data:", error);
       } finally {
-        setIsPanelLoading(false);
+        if (!cancelled) setIsPanelLoading(false);
+      }
+    };
+
+    const fetchTableColumns = async () => {
+      try {
+        const res = await fetch("/api/workflow/version/get-table-columns", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: user.uid,
+            agent_id: agentId,
+          }),
+        });
+        if (cancelled || !res.ok) return;
+        const json = await res.json();
+        const cols = json.columns ?? json.tableColumns ?? json.table_columns ?? json.data?.columns ?? [];
+        if (!cancelled && Array.isArray(cols)) {
+          setTableColumns(
+            cols.map((c: { key?: string; label?: string }) => ({
+              key: c.key ?? String(c),
+              label: c.label ?? c.key ?? String(c),
+            }))
+          );
+        }
+      } catch {
+        if (!cancelled) setTableColumns([]);
       }
     };
 
     fetchNodeData();
+    fetchTableColumns();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inspectedNode?.id, agentId]);
 
@@ -3956,6 +5562,12 @@ export function RunWorkflow({
         !mergedData.evalModel
       ) {
         mergedData.evalModel = "gpt-4o";
+      }
+
+      // Ensure agentic search nodes always persist engine to Firebase under "engine"
+      if (mergedData.kind === "agenticSearch") {
+        mergedData.engine =
+          mergedData.engine ?? mergedData.agenticSearchEngine ?? "firecrawl";
       }
 
       const payload = {
@@ -4057,7 +5669,34 @@ export function RunWorkflow({
         if (!response.ok) return;
 
         const data = await response.json();
-        if (!data.success || !data.workflowConfig) return;
+        if (!data.success) return;
+
+        const outputTypeValue =
+          data.outputType ??
+          data.agent?.outputType ??
+          data.agent?.output_type ??
+          data.version?.outputType ??
+          data.workflowConfig?.outputType ??
+          "single";
+        setOutputType(outputTypeValue === "table" ? "table" : "single");
+
+        // tableColumns live on the version doc in Firestore
+        const rawCols =
+          data.version?.tableColumns ??
+          data.tableColumns ??
+          data.agent?.tableColumns ??
+          data.workflowConfig?.tableColumns ??
+          [];
+        if (Array.isArray(rawCols) && rawCols.length > 0) {
+          setTableColumns(
+            rawCols.map((c: { key?: string; label?: string }) => ({
+              key: c.key ?? String(c),
+              label: c.label ?? c.key ?? String(c),
+            }))
+          );
+        }
+
+        if (!data.workflowConfig) return;
 
         const { nodes: backendNodes, edges: backendEdges } =
           data.workflowConfig;
@@ -4088,6 +5727,44 @@ export function RunWorkflow({
     };
 
     loadWorkflow();
+  }, [agentId]);
+
+  useEffect(() => {
+    if (!agentId) {
+      setTableColumns([]);
+      return;
+    }
+    const user = auth.currentUser;
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/workflow/version/get-table-columns", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: user.uid,
+            agent_id: agentId,
+          }),
+        });
+        if (cancelled || !res.ok) return;
+        const json = await res.json();
+        const cols = json.columns ?? json.tableColumns ?? json.table_columns ?? json.data?.columns ?? [];
+        if (!cancelled && Array.isArray(cols)) {
+          setTableColumns(
+            cols.map((c: { key?: string; label?: string }) => ({
+              key: c.key ?? String(c),
+              label: c.label ?? c.key ?? String(c),
+            }))
+          );
+        }
+      } catch {
+        if (!cancelled) setTableColumns([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [agentId]);
 
   const saveWorkflow = useCallback(async () => {
@@ -4284,6 +5961,14 @@ export function RunWorkflow({
           ? nodeName.trim()
           : kind === "connector" && extraData?.service
             ? `Connector: ${CONNECTOR_META[extraData.service].label}`
+            : kind === "website"
+              ? `Website ${nodeIdRef.current}`
+            : kind === "deepResearch"
+              ? `Deep Research ${nodeIdRef.current}`
+            : kind === "agenticSearch"
+              ? `Agentic Search ${nodeIdRef.current}`
+            : kind === "email"
+              ? `Send Email ${nodeIdRef.current}`
             : kind === "complete"
               ? `Complete ${nodeIdRef.current}`
               : `${kind} ${nodeIdRef.current}`;
@@ -4861,18 +6546,62 @@ export function RunWorkflow({
             ⚡ Add Trigger
           </ContextMenuItem>
 
-          {/* LLM */}
-          <ContextMenuItem
-            onSelect={() => addNode("llm")}
-            style={{
-              color: KIND_STYLES["llm"].border,
-              fontFamily: "inherit",
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-          >
-            🤖 Add LLM
-          </ContextMenuItem>
+          {/* Add Agent Tool submenu */}
+          <ContextMenuSub>
+            <ContextMenuSubTrigger
+              style={{
+                color: KIND_STYLES["llm"].border,
+                fontFamily: "inherit",
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              🤖 Add Agent Tool
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent
+              style={{
+                background: "#18181b",
+                border: "1px solid #27272a",
+                borderRadius: 8,
+                minWidth: 200,
+                padding: 4,
+              }}
+            >
+              <ContextMenuItem
+                onSelect={() => addNode("llm")}
+                style={{
+                  color: KIND_STYLES["llm"].border,
+                  fontFamily: "inherit",
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                Call LLM
+              </ContextMenuItem>
+              <ContextMenuItem
+                onSelect={() => addNode("deepResearch")}
+                style={{
+                  color: KIND_STYLES["deepResearch"].border,
+                  fontFamily: "inherit",
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                Run Deep Deep Research agent
+              </ContextMenuItem>
+              <ContextMenuItem
+                onSelect={() => addNode("agenticSearch")}
+                style={{
+                  color: KIND_STYLES["agenticSearch"].border,
+                  fontFamily: "inherit",
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                Agentic search
+              </ContextMenuItem>
+            </ContextMenuSubContent>
+          </ContextMenuSub>
 
           {/* Connectors submenu */}
           <ContextMenuSub>
@@ -4897,16 +6626,34 @@ export function RunWorkflow({
             >
               {(
                 [
+                  "website",
                   "slack",
                   "notion",
                   "gong",
                   "jira",
                   "confluence",
                   "apollo",
+                  "pipedrive",
                   "facebook_ads",
                   "linkedin_ads",
-                ] as ConnectorService[]
+                ] as Array<ConnectorService | "website">
               ).map((service) => {
+                if (service === "website") {
+                  return (
+                    <ContextMenuItem
+                      key={service}
+                      onSelect={() => addNode("website")}
+                      style={{
+                        color: KIND_STYLES["connector"].border,
+                        fontFamily: "inherit",
+                        fontSize: 13,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Website
+                    </ContextMenuItem>
+                  );
+                }
                 const comingSoon =
                   service === "facebook_ads" || service === "linkedin_ads";
                 return (
@@ -4999,6 +6746,43 @@ export function RunWorkflow({
           >
             🚩 For Review
           </ContextMenuItem>
+
+          {/* Actions submenu */}
+          <ContextMenuSub>
+            <ContextMenuSubTrigger
+              className="text-[#fafafa] data-[state=open]:text-[#fafafa] data-[highlighted]:text-[#fafafa]"
+              style={{
+                color: "#fafafa",
+                fontFamily: "inherit",
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              ⚙️ Actions
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent
+              style={{
+                background: "#18181b",
+                border: "1px solid #27272a",
+                borderRadius: 8,
+                minWidth: 160,
+                padding: 4,
+              }}
+            >
+              <ContextMenuItem
+                className="text-[#fafafa] data-[highlighted]:text-[#fafafa]"
+                onSelect={() => addNode("email")}
+                style={{
+                  color: "#fafafa",
+                  fontFamily: "inherit",
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                ✉️ Send email
+              </ContextMenuItem>
+            </ContextMenuSubContent>
+          </ContextMenuSub>
 
           <ContextMenuSeparator
             style={{ background: "#27272a", margin: "4px 0" }}
@@ -5346,7 +7130,7 @@ export function RunWorkflow({
       >
         <SheetContent
           side="right"
-          className="p-0 border-l border-[#27272a] bg-[#18181b] text-[#fafafa] w-[340px] sm:max-w-[340px]"
+          className="p-0 border-l border-[#27272a] bg-[#18181b] text-[#fafafa] w-[400px] sm:max-w-[400px]"
         >
           {/* visually-hidden accessible title required by SheetPrimitive */}
           <SheetHeader className="sr-only">
@@ -5364,6 +7148,9 @@ export function RunWorkflow({
               onChange={updateInspectedNode}
               onSave={saveNodeUpdate}
               allNodes={nodes}
+              agentId={agentId}
+              outputType={outputType}
+              tableColumns={tableColumns}
               onDelete={async () => {
                 const user = auth.currentUser;
                 if (user && agentId) {
