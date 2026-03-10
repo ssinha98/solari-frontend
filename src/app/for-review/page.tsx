@@ -59,6 +59,15 @@ type TableReviewData = {
   tableColumns?: Array<{ key: string; label: string }>;
 };
 
+function isUrl(val: string): boolean {
+  try {
+    const url = new URL(val.trim());
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function StatusBadge({ status }: { status: ReviewItem["status"] }) {
   if (status === "reviewed") {
     return (
@@ -393,10 +402,7 @@ function ForReviewContent() {
             )}
             {(tableData as TableReviewData).outputTable && (
               <div className="space-y-2">
-                <div className="flex items-center justify-between gap-4">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                    Table output
-                  </p>
+                <div className="flex items-center gap-4">
                   {selectedRowKeys.size > 0 && (
                     <Button
                       variant="outline"
@@ -485,6 +491,9 @@ function ForReviewContent() {
                       Delete rows
                     </Button>
                   )}
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Table output
+                  </p>
                 </div>
                 <div className="rounded-lg border overflow-hidden">
                   <Table>
@@ -573,18 +582,30 @@ function ForReviewContent() {
                                   className="text-xs max-w-[300px] group"
                                 >
                                   <div className="flex items-center justify-between gap-2">
-                                    <span
-                                      className="truncate flex-1 min-w-0"
-                                      title={
-                                        cellVal != null
-                                          ? typeof cellVal === "object"
-                                            ? JSON.stringify(cellVal)
-                                            : String(cellVal)
-                                          : undefined
-                                      }
-                                    >
-                                      {displayVal}
-                                    </span>
+                                    {displayVal && isUrl(displayVal) ? (
+                                      <a
+                                        href={displayVal.trim()}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="truncate flex-1 min-w-0 text-blue-400 hover:text-blue-300 underline underline-offset-2"
+                                        title={displayVal}
+                                      >
+                                        {displayVal}
+                                      </a>
+                                    ) : (
+                                      <span
+                                        className="truncate flex-1 min-w-0"
+                                        title={
+                                          cellVal != null
+                                            ? typeof cellVal === "object"
+                                              ? JSON.stringify(cellVal)
+                                              : String(cellVal)
+                                            : undefined
+                                        }
+                                      >
+                                        {displayVal}
+                                      </span>
+                                    )}
                                     <button
                                       type="button"
                                       onClick={() => {
