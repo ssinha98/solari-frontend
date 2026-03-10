@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { auth } from "@/tools/firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { CheckCircle, Clock, Pencil, Trash2, XCircle } from "lucide-react";
+import { CheckCircle, Clock, Loader2, Pencil, Trash2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -256,6 +256,8 @@ function ForReviewContent() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(
     new Set(),
   );
+  const [isResuming, setIsResuming] = useState(false);
+  const [resumed, setResumed] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -530,8 +532,13 @@ function ForReviewContent() {
                         (tableData as TableReviewData).outputTable.rows,
                       )
                         .sort(([a], [b]) => Number(a) - Number(b))
-                        .map(([rowKey, row]) => (
-                          <TableRow key={rowKey}>
+                        .map(([rowKey, row]) => {
+                          const evalFailed = row["eval_failed"] === true;
+                          return (
+                          <TableRow
+                            key={rowKey}
+                            className={evalFailed ? "bg-red-500/10 border-l-2 border-l-red-500" : ""}
+                          >
                             <TableCell className="w-10 px-2">
                               <Checkbox
                                 checked={selectedRowKeys.has(rowKey)}
@@ -603,8 +610,9 @@ function ForReviewContent() {
                               );
                             },
                           )}
-                        </TableRow>
-                      ))}
+                          </TableRow>
+                        );
+                        })}
                     </TableBody>
                   </Table>
                 </div>
@@ -680,9 +688,52 @@ function ForReviewContent() {
         <Button variant="outline" className="w-full">
           Restart workflow
         </Button>
-        <Button className="w-full bg-[#2D47BC] hover:bg-[#2D47BC]/90 text-white">
-          Save and continue workflow
-        </Button>
+        {resumed ? (
+          <Button
+            className="w-full bg-[#2D47BC] hover:bg-[#2D47BC]/90 text-white"
+            onClick={() => {
+              if (item) router.push(`/use-workflow?id=${item.agentId}`);
+            }}
+          >
+            View agent
+          </Button>
+        ) : (
+          <Button
+            className="w-full bg-[#2D47BC] hover:bg-[#2D47BC]/90 text-white"
+            disabled={isResuming}
+            onClick={async () => {
+              if (!userId || !reviewId) return;
+              setIsResuming(true);
+              try {
+                const res = await fetch("/api/workflow/for-review/resume", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ user_id: userId, review_id: reviewId }),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                  toast.error(data?.error ?? "Failed to resume workflow");
+                  return;
+                }
+                toast.success("Workflow resumed");
+                setResumed(true);
+              } catch {
+                toast.error("Failed to resume workflow");
+              } finally {
+                setIsResuming(false);
+              }
+            }}
+          >
+            {isResuming ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Continuing workflow…
+              </>
+            ) : (
+              "Save and continue workflow"
+            )}
+          </Button>
+        )}
       </div>
 
       {/* Cell edit dialog — table output only */}

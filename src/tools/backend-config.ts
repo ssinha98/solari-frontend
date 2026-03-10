@@ -14,7 +14,7 @@ export const getBackendUrl = (): string => {
     return envUrl;
   }
 
-  return ENVIRONMENT === "test"
+  return ENVIRONMENT === "prod"
     ? "http://localhost:5000"
     : "https://api.usesolari.ai";
 };

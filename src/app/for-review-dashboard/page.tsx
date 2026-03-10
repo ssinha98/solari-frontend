@@ -16,7 +16,7 @@ type DashboardItem = {
   agentName: string;
   nodeId: string;
   nodeLabel: string;
-  status: "pending" | "reviewed" | "dismissed";
+  status: "pending" | "reviewed" | "dismissed" | "resolved";
   createdAt: string;
   runId: string;
 };
@@ -219,7 +219,9 @@ function ForReviewDashboardContent() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item) => (
+                  {items.map((item) => {
+                    const isResolved = item.status === "resolved";
+                    return (
                     <tr
                       key={item.reviewId}
                       className="border-b last:border-b-0 cursor-pointer hover:bg-muted/50"
@@ -234,8 +236,9 @@ function ForReviewDashboardContent() {
                         onClick={(e) => e.stopPropagation()}
                       >
                         <Checkbox
-                          checked={selectedTaskIds.has(item.reviewId)}
+                          checked={isResolved || selectedTaskIds.has(item.reviewId)}
                           onCheckedChange={(checked) => {
+                            if (isResolved) return;
                             setSelectedTaskIds((prev) => {
                               const next = new Set(prev);
                               if (checked) {
@@ -249,16 +252,17 @@ function ForReviewDashboardContent() {
                           aria-label={`Select ${item.nodeLabel}`}
                         />
                       </td>
-                      <td className="py-3 px-4 text-sm">{item.nodeLabel}</td>
-                      <td className="py-3 px-4 text-sm">{item.agentName}</td>
-                      <td className="py-3 px-4 text-sm text-muted-foreground">
+                      <td className={`py-3 px-4 text-sm${isResolved ? " line-through text-muted-foreground" : ""}`}>{item.nodeLabel}</td>
+                      <td className={`py-3 px-4 text-sm${isResolved ? " line-through text-muted-foreground" : ""}`}>{item.agentName}</td>
+                      <td className={`py-3 px-4 text-sm text-muted-foreground${isResolved ? " line-through" : ""}`}>
                         {new Date(item.createdAt).toLocaleDateString()}
                       </td>
                       <td className="py-3 px-4">
                         <StatusBadge status={item.status} />
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

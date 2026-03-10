@@ -163,6 +163,7 @@ export default function DashboardPage() {
       agentId: string;
       nodeId: string;
       createdAt: string;
+      status: string;
     }[]
   >([]);
   const [isLoadingTasks, setIsLoadingTasks] = useState(true);
@@ -241,6 +242,7 @@ export default function DashboardPage() {
                 agentId: String(item.agentId ?? ""),
                 nodeId: String(item.nodeId ?? ""),
                 createdAt: String(item.createdAt ?? ""),
+                status: String(item.status ?? "pending"),
               }),
             ),
           );
@@ -1234,13 +1236,20 @@ export default function DashboardPage() {
             >
               Cancel
             </AlertDialogCancel>
-            <AlertDialogAction
+            <Button
               onClick={handleDeleteAgentConfirm}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               disabled={isDeletingAgent}
             >
-              {isDeletingAgent ? "Deleting..." : "Delete"}
-            </AlertDialogAction>
+              {isDeletingAgent ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -1447,15 +1456,18 @@ export default function DashboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {pendingTasksItems.map((item) => (
+                    {pendingTasksItems.map((item) => {
+                      const isResolved = item.status === "resolved";
+                      return (
                       <tr
                         key={item.reviewId}
                         className="border-b last:border-b-0"
                       >
                         <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                           <Checkbox
-                            checked={selectedTaskIds.has(item.reviewId)}
+                            checked={isResolved || selectedTaskIds.has(item.reviewId)}
                             onCheckedChange={(checked) => {
+                              if (isResolved) return;
                               setSelectedTaskIds((prev) => {
                                 const next = new Set(prev);
                                 if (checked) {
@@ -1469,9 +1481,9 @@ export default function DashboardPage() {
                             aria-label={`Select ${item.nodeLabel}`}
                           />
                         </td>
-                        <td className="py-3 px-4 text-sm">{item.nodeLabel}</td>
-                        <td className="py-3 px-4 text-sm">{item.agentName}</td>
-                        <td className="py-3 px-4 text-sm text-muted-foreground">
+                        <td className={`py-3 px-4 text-sm${isResolved ? " line-through text-muted-foreground" : ""}`}>{item.nodeLabel}</td>
+                        <td className={`py-3 px-4 text-sm${isResolved ? " line-through text-muted-foreground" : ""}`}>{item.agentName}</td>
+                        <td className={`py-3 px-4 text-sm text-muted-foreground${isResolved ? " line-through" : ""}`}>
                           {new Date(item.createdAt).toLocaleDateString()}
                         </td>
                         <td className="py-3 px-4">
@@ -1489,7 +1501,8 @@ export default function DashboardPage() {
                           </Button>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

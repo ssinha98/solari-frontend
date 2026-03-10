@@ -220,12 +220,15 @@ interface WorkflowNodeData extends Record<string, unknown> {
   evalUserPrompt?: string;
   evalPassNodeId?: string;
   evalFailNodeId?: string;
+  evalInputColumn?: string;
+  evalFailBehavior?: "delete" | "mark";
   evalProximityReferenceType?: "file" | "website";
   evalProximityFileId?: string;
   evalProximityFileName?: string;
   evalProximityFilePath?: string;
   evalProximityWebsite?: string;
   // trigger
+  triggerType?: "manual" | "slack" | "email" | "schedule";
   triggerMethod?: "GET" | "POST" | "PUT" | "DELETE";
   webhookPath?: string;
   // llm
@@ -233,6 +236,10 @@ interface WorkflowNodeData extends Record<string, unknown> {
   systemPrompt?: string;
   userPrompt?: string;
   temperature?: number;
+  llmExampleSourceId?: string;
+  llmExampleSourceName?: string;
+  referenceSourceName?: string;
+  referenceSourceData?: string;
   // condition
   conditionExpression?: string;
   // action
@@ -656,11 +663,43 @@ const panelTextareaStyle: React.CSSProperties = {
 
 interface WorkflowVariable {
   name: string;
-  kind: "input" | "output" | "column";
+  kind: "input" | "output" | "column" | "table";
   nodeLabel: string;
 }
 
 const WORKFLOW_MENTION_MENU_ID = "workflow-mention-menu";
+
+/**
+ * Converts a plain-text string that may contain @variable_name tokens into
+ * TipTap-compatible HTML where each known variable is represented as a proper
+ * mention node (<span data-type="mention" …>).  Unknown @-words are left as
+ * escaped plain text.  This prevents the suggestion plugin from treating
+ * pre-existing @-tokens as an in-progress mention trigger on load.
+ */
+function textToMentionHtml(text: string, variables: WorkflowVariable[]): string {
+  if (!text) return "<p></p>";
+  const variableNames = new Set(variables.map((v) => v.name));
+  const lines = text.split("\n");
+  const processedLines = lines.map((line) => {
+    const parts = line.split(/(@[\w.]+)/g);
+    return parts
+      .map((part) => {
+        if (part.startsWith("@")) {
+          const name = part.slice(1);
+          if (variableNames.has(name)) {
+            const safe = name.replace(/"/g, "&quot;");
+            return `<span data-type="mention" data-id="${safe}" data-label="${safe}"></span>`;
+          }
+        }
+        return part
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      })
+      .join("");
+  });
+  return `<p>${processedLines.join("</p><p>")}</p>`;
+}
 
 function workflowMentionSuggestionRender(editorRef: React.MutableRefObject<any>) {
   let root: HTMLDivElement | null = null;
@@ -733,7 +772,9 @@ function workflowMentionSuggestionRender(editorRef: React.MutableRefObject<any>)
           ? `${item.nodeLabel} · user input`
           : item.kind === "column"
             ? `${item.nodeLabel} · table column`
-            : `${item.nodeLabel} · node output`;
+            : item.kind === "table"
+              ? `workflow table output`
+              : `${item.nodeLabel} · node output`;
       metaEl.style.fontSize = "11px";
       metaEl.style.color = i === selectedIndex ? "rgba(255,255,255,0.75)" : "#71717a";
 
@@ -765,6 +806,11 @@ function workflowMentionSuggestionRender(editorRef: React.MutableRefObject<any>)
 
   return {
     onStart: (props: any) => {
+      // Don't open the menu if the editor doesn't have real DOM focus –
+      // this prevents the dropdown from appearing on initial content load
+      // when pre-existing @mentions are parsed as plain text.
+      if (!editorRef.current?.view?.hasFocus()) return;
+
       items = props.items ?? [];
       selectedIndex = 0;
       commandFn = props.command;
@@ -874,7 +920,7 @@ function WorkflowMentionTextarea({
         },
       }),
     ],
-    content: value ? `<p>${value.replace(/\n/g, "</p><p>")}</p>` : "<p></p>",
+    content: textToMentionHtml(value, variables),
     immediatelyRender: false,
     onUpdate: ({ editor }) => {
       onChange(editor.getText({ blockSeparator: "\n" }));
@@ -900,9 +946,7 @@ function WorkflowMentionTextarea({
     if (!editor || editor.isFocused) return;
     const currentText = editor.getText({ blockSeparator: "\n" });
     if (currentText !== value) {
-      const html = value
-        ? `<p>${value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "</p><p>")}</p>`
-        : "<p></p>";
+      const html = textToMentionHtml(value, variables);
       editor.commands.setContent(html, { emitUpdate: false });
     }
   }, [value, editor]);
@@ -1384,56 +1428,130 @@ function RequiresInputVariableField({
   );
 }
 
+const TRIGGER_TYPE_OPTIONS: {
+  value: NonNullable<WorkflowNodeData["triggerType"]>;
+  label: string;
+  description: string;
+  apiValue: string;
+}[] = [
+  {
+    value: "manual",
+    label: "Manual",
+    description: "Agent is triggered manually by a team member",
+    apiValue: "ui",
+  },
+  {
+    value: "slack",
+    label: "Slack",
+    description: "Agent is triggered by a Slack message or command",
+    apiValue: "slack",
+  },
+  {
+    value: "email",
+    label: "Email",
+    description: "Agent is triggered by an incoming email",
+    apiValue: "email",
+  },
+  {
+    value: "schedule",
+    label: "Schedule",
+    description: "Agent runs automatically on a set schedule",
+    apiValue: "schedule",
+  },
+];
+
 function TriggerPanel({
   data,
   onChange,
+  agentId,
 }: {
   data: WorkflowNodeData;
   onChange: (patch: Partial<WorkflowNodeData>) => void;
+  agentId?: string | null;
 }) {
+  const triggerType = data.triggerType ?? "manual";
+
+  const handleTriggerTypeChange = async (
+    value: NonNullable<WorkflowNodeData["triggerType"]>,
+  ) => {
+    const opt = TRIGGER_TYPE_OPTIONS.find((o) => o.value === value)!;
+    onChange({ triggerType: value, description: opt.description });
+
+    const user = auth.currentUser;
+    if (!user || !agentId) return;
+    try {
+      await fetch("/api/workflow/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.uid,
+          agent_id: agentId,
+          trigger: opt.apiValue,
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to sync trigger method:", err);
+    }
+  };
+
   return (
     <>
-      <PanelField label="HTTP Method">
-        <select
-          style={panelSelectStyle}
-          value={data.triggerMethod ?? "POST"}
-          onChange={(e) =>
-            onChange({
-              triggerMethod: e.target
-                .value as WorkflowNodeData["triggerMethod"],
-            })
-          }
-        >
-          {(["GET", "POST", "PUT", "DELETE"] as const).map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
+      <PanelField label="Trigger Type">
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {TRIGGER_TYPE_OPTIONS.map((opt) => {
+            const isSelected = triggerType === opt.value;
+            return (
+              <button
+                key={opt.value}
+                onClick={() => handleTriggerTypeChange(opt.value)}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  gap: 3,
+                  padding: "10px 12px",
+                  background: isSelected
+                    ? `${KIND_STYLES.trigger.border}1a`
+                    : "#09090b",
+                  border: `1px solid ${isSelected ? KIND_STYLES.trigger.border : "#3f3f46"}`,
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  width: "100%",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: isSelected ? KIND_STYLES.trigger.border : "#fafafa",
+                  }}
+                >
+                  {opt.label}
+                </span>
+                <span
+                  style={{ fontSize: 11, color: "#71717a", lineHeight: 1.4 }}
+                >
+                  {opt.description}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </PanelField>
-      <PanelField label="Webhook Path">
-        <input
-          style={panelInputStyle}
-          placeholder="/webhook/my-trigger"
-          value={data.webhookPath ?? ""}
-          onChange={(e) => onChange({ webhookPath: e.target.value })}
-        />
-      </PanelField>
-      <PanelField label="Description">
-        <textarea
-          style={panelTextareaStyle}
-          placeholder="What triggers this workflow?"
-          value={data.description ?? ""}
-          onChange={(e) => onChange({ description: e.target.value })}
-        />
-      </PanelField>
-      <SaveOutputField
-        value={data.outputVariable}
-        onChange={(val) => onChange({ outputVariable: val })}
-      />
     </>
   );
 }
+
+type ExampleSource = {
+  sourceId: string;
+  id: string | null;
+  name: string;
+  nickname?: string | null;
+  type: string;
+  contents?: string;
+};
 
 function LLMPanel({
   data,
@@ -1450,6 +1568,85 @@ function LLMPanel({
   outputType?: "single" | "table";
   agentId?: string | null;
 }) {
+  const [exampleSources, setExampleSources] = useState<ExampleSource[]>([]);
+  const [isLoadingSources, setIsLoadingSources] = useState(false);
+  const [addSourceOpen, setAddSourceOpen] = useState(false);
+  const [newSourceName, setNewSourceName] = useState("");
+  const [newSourceContents, setNewSourceContents] = useState("");
+  const [isSavingSource, setIsSavingSource] = useState(false);
+  const [sourceSaved, setSourceSaved] = useState(false);
+
+  useEffect(() => {
+    const fetchSources = async () => {
+      const user = auth.currentUser;
+      if (!user) return;
+      setIsLoadingSources(true);
+      try {
+        const res = await fetch("/api/sources/list", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user_id: user.uid }),
+        });
+        if (!res.ok) throw new Error(`${res.status}`);
+        const json = await res.json();
+        const allSources: ExampleSource[] = Array.isArray(json)
+          ? json
+          : (json.sources ?? []);
+        setExampleSources(
+          allSources.filter(
+            (s) => s.type === "confluence" || s.type === "document",
+          ),
+        );
+      } catch (err) {
+        console.error("Failed to load sources:", err);
+        setExampleSources([]);
+      } finally {
+        setIsLoadingSources(false);
+      }
+    };
+    fetchSources();
+  }, []);
+
+  const handleAddSource = async () => {
+    const user = auth.currentUser;
+    if (!user || !newSourceName.trim()) return;
+    setIsSavingSource(true);
+    try {
+      const res = await fetch("/api/sources/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.uid,
+          agent_id: agentId ?? undefined,
+          type: "document",
+          source_name: newSourceName.trim(),
+          contents: newSourceContents.trim(),
+        }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      const added: ExampleSource = await res.json();
+      setExampleSources((prev) => [...prev, added]);
+      onChange({
+        llmExampleSourceId: added.sourceId ?? added.id ?? undefined,
+        llmExampleSourceName: added.nickname ?? added.name,
+        referenceSourceName: newSourceName.trim(),
+        referenceSourceData: newSourceContents.trim(),
+      });
+      setIsSavingSource(false);
+      setSourceSaved(true);
+      setTimeout(() => {
+        setAddSourceOpen(false);
+        setSourceSaved(false);
+        setNewSourceName("");
+        setNewSourceContents("");
+      }, 800);
+    } catch (err) {
+      console.error("Failed to add source:", err);
+      toast.error("Failed to add source");
+      setIsSavingSource(false);
+    }
+  };
+
   return (
     <>
       <PanelField label="Model">
@@ -1519,6 +1716,79 @@ function LLMPanel({
           <span>Creative (2)</span>
         </div>
       </PanelField>
+      <PanelField label="Example sources">
+        <Select
+          value={data.llmExampleSourceId ?? ""}
+          onValueChange={(val) => {
+            const source = exampleSources.find((s) => s.sourceId === val);
+            const sourceName = source?.nickname ?? source?.name ?? val;
+            const patch: Partial<WorkflowNodeData> = {
+              llmExampleSourceId: val,
+              llmExampleSourceName: sourceName,
+              referenceSourceName: sourceName,
+              referenceSourceData: source?.contents ?? undefined,
+            };
+            onChange(patch);
+            onSave(patch);
+          }}
+        >
+          <SelectTrigger className="w-full bg-[#09090b] border-[#3f3f46] text-[#fafafa] hover:bg-[#09090b] focus:ring-0 focus:ring-offset-0">
+            <SelectValue
+              placeholder={
+                isLoadingSources ? "Loading sources…" : "Select a source"
+              }
+            />
+          </SelectTrigger>
+          <SelectContent className="bg-[#18181b] border-[#27272a] text-[#fafafa] p-0">
+            <div
+              key="quick-add"
+              className="sticky top-0 z-10 bg-[#18181b] border-b border-[#27272a]"
+              onMouseDown={(e) => e.preventDefault()}
+            >
+              <button
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-[#a1a1aa] hover:text-[#fafafa] hover:bg-[#27272a] transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAddSourceOpen(true);
+                }}
+              >
+                <Plus size={14} />
+                Quick add source
+              </button>
+            </div>
+            {data.llmExampleSourceId &&
+              data.llmExampleSourceName &&
+              !exampleSources.some((s) => s.sourceId === data.llmExampleSourceId) && (
+                <SelectItem
+                  key={data.llmExampleSourceId}
+                  value={data.llmExampleSourceId}
+                  className="focus:bg-[#27272a] focus:text-[#fafafa]"
+                >
+                  {data.llmExampleSourceName}
+                </SelectItem>
+              )}
+            {exampleSources.length === 0 &&
+              !isLoadingSources &&
+              !data.llmExampleSourceId && (
+                <div
+                  key="empty"
+                  className="px-3 py-4 text-center text-sm text-[#52525b]"
+                >
+                  No sources found
+                </div>
+              )}
+            {exampleSources.map((source) => (
+              <SelectItem
+                key={source.sourceId}
+                value={source.sourceId}
+                className="focus:bg-[#27272a] focus:text-[#fafafa]"
+              >
+                {source.nickname ?? source.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </PanelField>
       <PanelField label="Description">
         <textarea
           style={panelTextareaStyle}
@@ -1527,19 +1797,90 @@ function LLMPanel({
           onChange={(e) => onChange({ description: e.target.value })}
         />
       </PanelField>
-      {outputType === "table" ? (
+      {outputType === "table" && (
         <TableConfigurationSection
           kind="llm"
           data={data}
           onChange={onChange}
           agentId={agentId}
         />
-      ) : (
-        <SaveOutputField
-          value={data.outputVariable}
-          onChange={(val) => onChange({ outputVariable: val })}
-        />
       )}
+      <SaveOutputField
+        value={data.outputVariable}
+        onChange={(val) => onChange({ outputVariable: val })}
+      />
+      <AlertDialog open={addSourceOpen} onOpenChange={(open) => {
+        if (!open) {
+          setNewSourceName("");
+          setNewSourceContents("");
+          setSourceSaved(false);
+        }
+        setAddSourceOpen(open);
+      }}>
+        <AlertDialogContent className="bg-[#18181b] border-[#27272a] text-[#fafafa]">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Quick add source</AlertDialogTitle>
+          </AlertDialogHeader>
+          <div className="flex flex-col gap-3 py-2">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-[#a1a1aa]">
+                Source name
+              </label>
+              <Input
+                value={newSourceName}
+                onChange={(e) => setNewSourceName(e.target.value)}
+                placeholder="e.g. Product specs"
+                className="bg-[#09090b] border-[#3f3f46] text-[#fafafa] placeholder:text-[#52525b] focus-visible:ring-0 focus-visible:ring-offset-0"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-[#a1a1aa]">
+                Source contents
+              </label>
+              <textarea
+                value={newSourceContents}
+                onChange={(e) => setNewSourceContents(e.target.value)}
+                placeholder="Paste or type the source content here…"
+                rows={6}
+                style={panelTextareaStyle}
+              />
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              className="bg-transparent border-[#3f3f46] text-[#a1a1aa] hover:bg-[#27272a] hover:text-[#fafafa]"
+              onClick={() => {
+                setNewSourceName("");
+                setNewSourceContents("");
+              }}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-[#6366f1] text-white hover:bg-[#4f46e5] disabled:opacity-50 min-w-[90px] justify-center"
+              disabled={!newSourceName.trim() || isSavingSource || sourceSaved}
+              onClick={(e) => {
+                e.preventDefault();
+                handleAddSource();
+              }}
+            >
+              {isSavingSource ? (
+                <>
+                  <Loader2 size={14} className="animate-spin mr-1.5" />
+                  Saving...
+                </>
+              ) : sourceSaved ? (
+                <>
+                  <Check size={14} className="mr-1.5" />
+                  Saved
+                </>
+              ) : (
+                "Save"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -2324,19 +2665,18 @@ function PipedrivePanel({
           minHeight={40}
         />
       </PanelField>
-      {outputType === "table" ? (
+      {outputType === "table" && (
         <TableConfigurationSection
           kind="connector"
           data={data}
           onChange={onChange}
           agentId={agentId}
         />
-      ) : (
-        <SaveOutputField
-          value={data.outputVariable}
-          onChange={(val) => onChange({ outputVariable: val })}
-        />
       )}
+      <SaveOutputField
+        value={data.outputVariable}
+        onChange={(val) => onChange({ outputVariable: val })}
+      />
     </div>
   );
 }
@@ -2565,19 +2905,18 @@ function ApolloPanel({
         </PanelField>
       )}
 
-      {outputType === "table" ? (
+      {outputType === "table" && (
         <TableConfigurationSection
           kind="connector"
           data={data}
           onChange={onChange}
           agentId={agentId}
         />
-      ) : (
-        <SaveOutputField
-          value={data.outputVariable}
-          onChange={(val) => onChange({ outputVariable: val })}
-        />
       )}
+      <SaveOutputField
+        value={data.outputVariable}
+        onChange={(val) => onChange({ outputVariable: val })}
+      />
     </div>
   );
 }
@@ -3172,53 +3511,50 @@ function ConnectorPanel({
               <SlackSendPanel />
             </TabsContent>
           </Tabs>
-          {outputType === "table" ? (
+          {outputType === "table" && (
             <TableConfigurationSection
               kind="connector"
               data={data}
               onChange={onChange}
               agentId={agentId}
             />
-          ) : (
-            <SaveOutputField
-              value={data.outputVariable}
-              onChange={(val) => onChange({ outputVariable: val })}
-            />
           )}
+          <SaveOutputField
+            value={data.outputVariable}
+            onChange={(val) => onChange({ outputVariable: val })}
+          />
         </>
       ) : isJira ? (
         <>
           <JiraPanel data={data} onChange={onChange} />
-          {outputType === "table" ? (
+          {outputType === "table" && (
             <TableConfigurationSection
               kind="connector"
               data={data}
               onChange={onChange}
               agentId={agentId}
             />
-          ) : (
-            <SaveOutputField
-              value={data.outputVariable}
-              onChange={(val) => onChange({ outputVariable: val })}
-            />
           )}
+          <SaveOutputField
+            value={data.outputVariable}
+            onChange={(val) => onChange({ outputVariable: val })}
+          />
         </>
       ) : isConfluence ? (
         <>
           <ConfluencePanel data={data} onChange={onChange} />
-          {outputType === "table" ? (
+          {outputType === "table" && (
             <TableConfigurationSection
               kind="connector"
               data={data}
               onChange={onChange}
               agentId={agentId}
             />
-          ) : (
-            <SaveOutputField
-              value={data.outputVariable}
-              onChange={(val) => onChange({ outputVariable: val })}
-            />
           )}
+          <SaveOutputField
+            value={data.outputVariable}
+            onChange={(val) => onChange({ outputVariable: val })}
+          />
         </>
       ) : isGong ? (
         <>
@@ -3227,19 +3563,18 @@ function ConnectorPanel({
             onChange={onChange}
             availableVariables={availableVariables}
           />
-          {outputType === "table" ? (
+          {outputType === "table" && (
             <TableConfigurationSection
               kind="connector"
               data={data}
               onChange={onChange}
               agentId={agentId}
             />
-          ) : (
-            <SaveOutputField
-              value={data.outputVariable}
-              onChange={(val) => onChange({ outputVariable: val })}
-            />
           )}
+          <SaveOutputField
+            value={data.outputVariable}
+            onChange={(val) => onChange({ outputVariable: val })}
+          />
         </>
       ) : isApollo ? (
         <ApolloPanel
@@ -3280,19 +3615,18 @@ function ConnectorPanel({
               minHeight={80}
             />
           </PanelField>
-          {outputType === "table" ? (
+          {outputType === "table" && (
             <TableConfigurationSection
               kind="connector"
               data={data}
               onChange={onChange}
               agentId={agentId}
             />
-          ) : (
-            <SaveOutputField
-              value={data.outputVariable}
-              onChange={(val) => onChange({ outputVariable: val })}
-            />
           )}
+          <SaveOutputField
+            value={data.outputVariable}
+            onChange={(val) => onChange({ outputVariable: val })}
+          />
         </>
       )}
     </>
@@ -3672,13 +4006,19 @@ function EvalPanel({
   onSave,
   allNodes,
   currentNodeId,
+  outputType = "single",
+  tableColumns = [],
 }: {
   data: WorkflowNodeData;
   onChange: (patch: Partial<WorkflowNodeData>) => void;
   onSave: (patch: Partial<WorkflowNodeData>) => Promise<boolean>;
   allNodes: Node<WorkflowNodeData>[];
   currentNodeId: string;
+  outputType?: "single" | "table";
+  tableColumns?: { key: string; label: string }[];
 }) {
+  const [evalTableMode, setEvalTableMode] = useState<boolean>(!!data.evalInputColumn);
+
   const inputVar = data.evalInputVariable ?? "";
   // Check if any other node in the workflow has this outputVariable set
   const isVariableValid: boolean =
@@ -3838,62 +4178,178 @@ function EvalPanel({
         />
       </PanelField> */}
 
-      {/* Pass / Fail routing */}
-      <Separator className="bg-[#27272a] my-2" />
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {(
-          [
-            { key: "evalPassNodeId", label: "On eval pass", color: "#4ade80" },
-            { key: "evalFailNodeId", label: "On eval fail", color: "#f87171" },
-          ] as const
-        ).map(({ key, label, color }) => (
-          <div
-            key={key}
-            style={{ display: "flex", flexDirection: "column", gap: 5 }}
-          >
+      {/* Table eval toggle — only shown in table mode */}
+      {outputType === "table" && (
+        <>
+          <Separator className="bg-[#27272a] my-2" />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
             <span
               style={{
                 fontSize: 10,
                 fontWeight: 600,
                 letterSpacing: "0.08em",
                 textTransform: "uppercase",
-                color,
+                color: "#71717a",
               }}
             >
-              {label}
+              Evaluate Table
             </span>
-            <Select
-              value={data[key] ?? ""}
-              onValueChange={(val) => onChange({ [key]: val })}
+            <button
+              type="button"
+              onClick={() => {
+                const next = !evalTableMode;
+                setEvalTableMode(next);
+                if (!next) onChange({ evalInputColumn: undefined, evalFailBehavior: undefined });
+              }}
+              style={{
+                position: "relative",
+                display: "inline-flex",
+                width: 36,
+                height: 20,
+                borderRadius: 10,
+                border: "none",
+                cursor: "pointer",
+                padding: 0,
+                background: evalTableMode ? "#2D47BC" : "#3f3f46",
+                transition: "background 0.2s",
+              }}
             >
-              <SelectTrigger className={nodeSelectClass}>
-                <SelectValue placeholder="Select a node…" />
-              </SelectTrigger>
-              <SelectContent className="bg-[#09090b] border-[#3f3f46]">
-                {otherNodes.length === 0 ? (
-                  <SelectItem
-                    value="__none__"
-                    disabled
-                    className="text-[#52525b]"
-                  >
-                    No other nodes
-                  </SelectItem>
-                ) : (
-                  otherNodes.map((n) => (
-                    <SelectItem
-                      key={n.id}
-                      value={n.id}
-                      className="text-[#fafafa] focus:bg-[#27272a]"
-                    >
-                      {n.data.label}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
+              <span
+                style={{
+                  position: "absolute",
+                  top: 3,
+                  left: evalTableMode ? 19 : 3,
+                  width: 14,
+                  height: 14,
+                  borderRadius: "50%",
+                  background: "#fafafa",
+                  transition: "left 0.2s",
+                }}
+              />
+            </button>
           </div>
-        ))}
-      </div>
+
+          {evalTableMode && (
+            <PanelField label="Column to Evaluate">
+              <Select
+                value={data.evalInputColumn ?? ""}
+                onValueChange={(val) => onChange({ evalInputColumn: val })}
+              >
+                <SelectTrigger className={nodeSelectClass}>
+                  <SelectValue placeholder="Select a column…" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#09090b] border-[#3f3f46]">
+                  {tableColumns.length === 0 ? (
+                    <SelectItem value="__none__" disabled className="text-[#52525b]">
+                      No columns defined
+                    </SelectItem>
+                  ) : (
+                    tableColumns.map((col) => (
+                      <SelectItem
+                        key={col.key}
+                        value={col.key}
+                        className="text-[#fafafa] focus:bg-[#27272a]"
+                      >
+                        {col.label}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </PanelField>
+          )}
+        </>
+      )}
+
+      {/* Pass / Fail routing */}
+      <Separator className="bg-[#27272a] my-2" />
+
+      {evalTableMode ? (
+        /* Table mode: single "On fail" action instead of node routing */
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: "#f87171",
+            }}
+          >
+            On Fail
+          </span>
+          <Select
+            value={data.evalFailBehavior ?? ""}
+            onValueChange={(val) =>
+              onChange({ evalFailBehavior: val as "delete" | "mark" })
+            }
+          >
+            <SelectTrigger className={nodeSelectClass}>
+              <SelectValue placeholder="Choose action…" />
+            </SelectTrigger>
+            <SelectContent className="bg-[#09090b] border-[#3f3f46]">
+              <SelectItem value="delete" className="text-[#fafafa] focus:bg-[#27272a]">
+                Delete row
+              </SelectItem>
+              <SelectItem value="mark" className="text-[#fafafa] focus:bg-[#27272a]">
+                Mark for review
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      ) : (
+        /* Standard mode: pass / fail node routing */
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {(
+            [
+              { key: "evalPassNodeId", label: "On eval pass", color: "#4ade80" },
+              { key: "evalFailNodeId", label: "On eval fail", color: "#f87171" },
+            ] as const
+          ).map(({ key, label, color }) => (
+            <div
+              key={key}
+              style={{ display: "flex", flexDirection: "column", gap: 5 }}
+            >
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color,
+                }}
+              >
+                {label}
+              </span>
+              <Select
+                value={data[key] ?? ""}
+                onValueChange={(val) => onChange({ [key]: val })}
+              >
+                <SelectTrigger className={nodeSelectClass}>
+                  <SelectValue placeholder="Select a node…" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#09090b] border-[#3f3f46]">
+                  {otherNodes.length === 0 ? (
+                    <SelectItem value="__none__" disabled className="text-[#52525b]">
+                      No other nodes
+                    </SelectItem>
+                  ) : (
+                    otherNodes.map((n) => (
+                      <SelectItem
+                        key={n.id}
+                        value={n.id}
+                        className="text-[#fafafa] focus:bg-[#27272a]"
+                      >
+                        {n.data.label}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }
@@ -3959,19 +4415,18 @@ function WebsitePanel({
           minHeight={110}
         />
       </PanelField>
-      {outputType === "table" ? (
+      {outputType === "table" && (
         <TableConfigurationSection
           kind="website"
           data={data}
           onChange={onChange}
           agentId={agentId}
         />
-      ) : (
-        <SaveOutputField
-          value={data.outputVariable}
-          onChange={(val) => onChange({ outputVariable: val })}
-        />
       )}
+      <SaveOutputField
+        value={data.outputVariable}
+        onChange={(val) => onChange({ outputVariable: val })}
+      />
     </>
   );
 }
@@ -4029,19 +4484,18 @@ function DeepResearchPanel({
           minHeight={120}
         />
       </PanelField>
-      {outputType === "table" ? (
+      {outputType === "table" && (
         <TableConfigurationSection
           kind="deepResearch"
           data={data}
           onChange={onChange}
           agentId={agentId}
         />
-      ) : (
-        <SaveOutputField
-          value={data.outputVariable}
-          onChange={(val) => onChange({ outputVariable: val })}
-        />
       )}
+      <SaveOutputField
+        value={data.outputVariable}
+        onChange={(val) => onChange({ outputVariable: val })}
+      />
     </>
   );
 }
@@ -4185,19 +4639,18 @@ function AgenticSearchPanel({
           onChange={(e) => onChange({ agentSearchLimit: e.target.value })}
         />
       </PanelField>
-      {outputType === "table" ? (
+      {outputType === "table" && (
         <TableConfigurationSection
           kind="agenticSearch"
           data={data}
           onChange={onChange}
           agentId={agentId}
         />
-      ) : (
-        <SaveOutputField
-          value={data.outputVariable}
-          onChange={(val) => onChange({ outputVariable: val })}
-        />
       )}
+      <SaveOutputField
+        value={data.outputVariable}
+        onChange={(val) => onChange({ outputVariable: val })}
+      />
     </>
   );
 }
@@ -5118,8 +5571,13 @@ function NodeInspectorPanel({
     return vars;
   });
 
-  // Table columns first so they appear prominently in the @ menu
-  const availableVariables: WorkflowVariable[] = [...tableColumnVars, ...nodeVars];
+  const tableOutputVar: WorkflowVariable[] =
+    outputType === "table"
+      ? [{ name: "table", kind: "table", nodeLabel: "table" }]
+      : [];
+
+  // Table output var first, then columns, then node vars
+  const availableVariables: WorkflowVariable[] = [...tableOutputVar, ...tableColumnVars, ...nodeVars];
 
   const handleSave = async () => {
     if (kind === "agenticSearch") {
@@ -5209,7 +5667,7 @@ function NodeInspectorPanel({
 
         {/* Kind-specific fields */}
         {kind === "trigger" && (
-          <TriggerPanel data={node.data} onChange={onChange} />
+          <TriggerPanel data={node.data} onChange={onChange} agentId={agentId} />
         )}
         {kind === "llm" && (
           <LLMPanel
@@ -5264,6 +5722,8 @@ function NodeInspectorPanel({
             onSave={onSave}
             allNodes={allNodes}
             currentNodeId={node.id}
+            outputType={outputType}
+            tableColumns={tableColumns}
           />
         )}
         {kind === "forReview" && (
@@ -5403,9 +5863,10 @@ const initialNodes: Node<WorkflowNodeData>[] = [
     type: "workflow",
     position: { x: 80, y: 180 },
     data: {
-      label: "HTTP Request",
+      label: "Trigger",
       kind: "trigger",
-      description: "Receives incoming webhook",
+      triggerType: "manual",
+      description: "Agent is triggered manually by a team member",
     },
   },
 ];
@@ -5444,6 +5905,8 @@ export function RunWorkflow({
   const [inspectedNode, setInspectedNode] =
     useState<Node<WorkflowNodeData> | null>(null);
   const nodeIdRef = useRef(initialNodes.length + 1);
+  const isSavingRef = useRef(false);
+  const saveWorkflowRef = useRef<(silent?: boolean) => Promise<void>>(async () => {});
 
   const [isPanelLoading, setIsPanelLoading] = useState(false);
   const [outputType, setOutputType] = useState<"single" | "table">("single");
@@ -5585,6 +6048,33 @@ export function RunWorkflow({
         });
         if (!res.ok) {
           const errText = await res.text();
+
+          if (res.status === 404 && errText.includes("node_not_found")) {
+            console.log("[update-node] node_not_found — saving workflow and retrying");
+            // Wait for any in-progress save to finish, then save & retry
+            await new Promise<void>((resolve) => {
+              const check = () => {
+                if (!isSavingRef.current) resolve();
+                else setTimeout(check, 100);
+              };
+              check();
+            });
+            await saveWorkflowRef.current(true);
+            const retryRes = await fetch("/api/workflow/update-node", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (!retryRes.ok) {
+              const retryErrText = await retryRes.text();
+              console.error("[update-node] retry error", retryRes.status, retryErrText);
+              return false;
+            }
+            const retryJson = await retryRes.json();
+            console.log("[update-node] retry success:", retryJson);
+            return retryJson.success === true;
+          }
+
           console.error("[update-node] error", res.status, errText);
           return false;
         }
@@ -5708,7 +6198,11 @@ export function RunWorkflow({
               : n
           );
           setNodes(migratedNodes as Node<WorkflowNodeData>[]);
-          nodeIdRef.current = backendNodes.length + 1;
+          const maxId = backendNodes.reduce((max: number, n: Node<WorkflowNodeData>) => {
+            const num = parseInt(String(n.id).replace(/\D/g, ""), 10);
+            return isNaN(num) ? max : Math.max(max, num);
+          }, 0);
+          nodeIdRef.current = maxId + 1;
         }
 
         if (Array.isArray(backendEdges)) {
@@ -5767,11 +6261,12 @@ export function RunWorkflow({
     };
   }, [agentId]);
 
-  const saveWorkflow = useCallback(async () => {
+  const saveWorkflow = useCallback(async (silent?: boolean) => {
     const user = auth.currentUser;
     if (!user || !agentId || isSaving) return;
 
     setIsSaving(true);
+    isSavingRef.current = true;
     try {
       const response = await fetch("/api/workflow/save-version", {
         method: "POST",
@@ -5797,12 +6292,13 @@ export function RunWorkflow({
 
       if (!response.ok) throw new Error(`Status ${response.status}`);
 
-      toast.success("Workflow saved");
+      if (!silent) toast.success("Workflow saved");
     } catch (error) {
       console.error("Failed to save workflow:", error);
-      toast.error("Failed to save workflow. Please try again.");
+      if (!silent) toast.error("Failed to save workflow. Please try again.");
     } finally {
       setIsSaving(false);
+      isSavingRef.current = false;
     }
   }, [agentId, nodes, edges, isSaving]);
 
@@ -5816,6 +6312,11 @@ export function RunWorkflow({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [saveWorkflow]);
+
+  // Keep saveWorkflowRef in sync so saveNodeUpdate can call it without a stale closure
+  useEffect(() => {
+    saveWorkflowRef.current = saveWorkflow;
   }, [saveWorkflow]);
 
   const onNodesChange: OnNodesChange = useCallback(
@@ -6421,7 +6922,7 @@ export function RunWorkflow({
                 </button>
               )}
               <button
-                onClick={saveWorkflow}
+                onClick={() => saveWorkflow()}
                 disabled={isSaving || !agentId}
                 style={{
                   padding: "10px 20px",
@@ -6533,18 +7034,20 @@ export function RunWorkflow({
             padding: 4,
           }}
         >
-          {/* Trigger */}
-          <ContextMenuItem
-            onSelect={() => addNode("trigger")}
-            style={{
-              color: KIND_STYLES["trigger"].border,
-              fontFamily: "inherit",
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-          >
-            ⚡ Add Trigger
-          </ContextMenuItem>
+          {/* Trigger — only shown when no trigger node exists yet */}
+          {!nodes.some((n) => n.data.kind === "trigger") && (
+            <ContextMenuItem
+              onSelect={() => addNode("trigger")}
+              style={{
+                color: KIND_STYLES["trigger"].border,
+                fontFamily: "inherit",
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              ⚡ Add Trigger
+            </ContextMenuItem>
+          )}
 
           {/* Add Agent Tool submenu */}
           <ContextMenuSub>

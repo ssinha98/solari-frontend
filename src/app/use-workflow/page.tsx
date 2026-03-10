@@ -350,6 +350,31 @@ function UseWorkflowContent() {
     };
   }, [userReady, agentId, versionId]);
 
+  // On mount, seed currentRunId/runStatus from any active run so polling picks it up
+  useEffect(() => {
+    if (!userReady || !agentId) return;
+    const user = auth.currentUser;
+    if (!user) return;
+
+    fetch("/api/workflow/run/list", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: user.uid, agent_id: agentId }),
+    })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.success) return;
+        const active = data.activeRuns?.[0];
+        if (active?.runId && active?.status) {
+          setCurrentRunId(active.runId);
+          setRunStatus(active.status);
+          if (active.failureReason) setFailureReason(active.failureReason);
+        }
+      })
+      .catch(() => {});
+  }, [userReady, agentId]);
+
   // Fetch input variables for run
   useEffect(() => {
     if (!userReady || !agentId) {

@@ -737,10 +737,11 @@ export function ConfigureWorkflow({ agentId }: { agentId: string | null }) {
                       <SelectValue placeholder="Select trigger" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="ui">UI</SelectItem>
+                      <SelectItem value="ui">Manual</SelectItem>
                       <SelectItem value="webhook">Webhook</SelectItem>
                       <SelectItem value="slack">Slack</SelectItem>
                       <SelectItem value="email">Email</SelectItem>
+                      <SelectItem value="schedule">Schedule</SelectItem>
                     </SelectContent>
                   </Select>
                 </CardContent>
