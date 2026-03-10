@@ -85,7 +85,7 @@ const dummyAgentRuns = [
 
 // Helper function to get icon component based on agent type
 function getAgentTypeIcon(type: string) {
-  switch (type.toLowerCase()) {
+  switch ((type ?? "").toLowerCase()) {
     case "workflow":
       return <GoWorkflow className="h-5 w-5" />;
     case "source chat":
@@ -98,7 +98,7 @@ function getAgentTypeIcon(type: string) {
 }
 
 function getAgentTypeLabel(type: string) {
-  switch (type.toLowerCase()) {
+  switch ((type ?? "").toLowerCase()) {
     case "source chat":
       return "Chat (RAG)";
     case "workflow":
@@ -280,22 +280,18 @@ export default function DashboardPage() {
           return;
         }
         const data = await response.json();
-        setPendingTasksCount(
-          typeof data.count === "number" ? data.count : 0,
-        );
+        setPendingTasksCount(typeof data.count === "number" ? data.count : 0);
         if (data.success && Array.isArray(data.items)) {
           setPendingTasksItems(
-            data.items.map(
-              (item: Record<string, unknown>) => ({
-                reviewId: String(item.reviewId ?? ""),
-                nodeLabel: String(item.nodeLabel ?? ""),
-                agentName: String(item.agentName ?? ""),
-                agentId: String(item.agentId ?? ""),
-                nodeId: String(item.nodeId ?? ""),
-                createdAt: String(item.createdAt ?? ""),
-                status: String(item.status ?? "pending"),
-              }),
-            ),
+            data.items.map((item: Record<string, unknown>) => ({
+              reviewId: String(item.reviewId ?? ""),
+              nodeLabel: String(item.nodeLabel ?? ""),
+              agentName: String(item.agentName ?? ""),
+              agentId: String(item.agentId ?? ""),
+              nodeId: String(item.nodeId ?? ""),
+              createdAt: String(item.createdAt ?? ""),
+              status: String(item.status ?? "pending"),
+            })),
           );
         }
       } catch (error) {
@@ -311,7 +307,9 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setSelectedTaskIds((prev) => {
-      const availableIds = new Set(pendingTasksItems.map((item) => item.reviewId));
+      const availableIds = new Set(
+        pendingTasksItems.map((item) => item.reviewId),
+      );
       const next = new Set<string>();
       prev.forEach((id) => {
         if (availableIds.has(id)) {
@@ -1186,7 +1184,9 @@ export default function DashboardPage() {
       setPendingTasksItems((prev) =>
         prev.filter((item) => !selectedTaskIds.has(item.reviewId)),
       );
-      setPendingTasksCount((prev) => Math.max((prev ?? 0) - reviewIds.length, 0));
+      setPendingTasksCount((prev) =>
+        Math.max((prev ?? 0) - reviewIds.length, 0),
+      );
       setSelectedTaskIds(new Set());
       toast.success("Selected tasks deleted.");
     } catch (error) {
@@ -1451,7 +1451,8 @@ export default function DashboardPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Add to agent store</AlertDialogTitle>
             <AlertDialogDescription>
-              Publish &ldquo;{agentToPublish?.name || "this agent"}&rdquo; to the agent store.
+              Publish &ldquo;{agentToPublish?.name || "this agent"}&rdquo; to
+              the agent store.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-3 py-2">
@@ -1493,10 +1494,7 @@ export default function DashboardPage() {
             >
               Cancel
             </AlertDialogCancel>
-            <Button
-              onClick={handlePublishToAgentStore}
-              disabled={isPublishing}
-            >
+            <Button onClick={handlePublishToAgentStore} disabled={isPublishing}>
               {isPublishing ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1669,7 +1667,10 @@ export default function DashboardPage() {
               onClick={() => router.push("/for-review-dashboard")}
               className="text-lg font-semibold hover:underline underline-offset-4 text-left"
             >
-              Your tasks{!isLoadingTasks && pendingTasksCount !== null ? ` (${pendingTasksCount})` : ""}
+              Your tasks
+              {!isLoadingTasks && pendingTasksCount !== null
+                ? ` (${pendingTasksCount})`
+                : ""}
             </button>
             {selectedTaskIds.size > 0 && (
               <Button
@@ -1693,7 +1694,9 @@ export default function DashboardPage() {
             }}
           >
             {isLoadingTasks ? (
-              <p className="text-sm text-muted-foreground p-6">Loading tasks...</p>
+              <p className="text-sm text-muted-foreground p-6">
+                Loading tasks...
+              </p>
             ) : pendingTasksItems.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -1716,48 +1719,63 @@ export default function DashboardPage() {
                     {pendingTasksItems.map((item) => {
                       const isResolved = item.status === "resolved";
                       return (
-                      <tr
-                        key={item.reviewId}
-                        className="border-b last:border-b-0"
-                      >
-                        <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                          <Checkbox
-                            checked={isResolved || selectedTaskIds.has(item.reviewId)}
-                            onCheckedChange={(checked) => {
-                              if (isResolved) return;
-                              setSelectedTaskIds((prev) => {
-                                const next = new Set(prev);
-                                if (checked) {
-                                  next.add(item.reviewId);
-                                } else {
-                                  next.delete(item.reviewId);
-                                }
-                                return next;
-                              });
-                            }}
-                            aria-label={`Select ${item.nodeLabel}`}
-                          />
-                        </td>
-                        <td className={`py-3 px-4 text-sm${isResolved ? " line-through text-muted-foreground" : ""}`}>{item.nodeLabel}</td>
-                        <td className={`py-3 px-4 text-sm${isResolved ? " line-through text-muted-foreground" : ""}`}>{item.agentName}</td>
-                        <td className={`py-3 px-4 text-sm text-muted-foreground${isResolved ? " line-through" : ""}`}>
-                          {new Date(item.createdAt).toLocaleDateString()}
-                        </td>
-                        <td className="py-3 px-4">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              router.push(
-                                `/for-review?reviewId=${item.reviewId}`,
-                              );
-                            }}
+                        <tr
+                          key={item.reviewId}
+                          className="border-b last:border-b-0"
+                        >
+                          <td
+                            className="py-3 px-4"
+                            onClick={(e) => e.stopPropagation()}
                           >
-                            Review
-                          </Button>
-                        </td>
-                      </tr>
+                            <Checkbox
+                              checked={
+                                isResolved || selectedTaskIds.has(item.reviewId)
+                              }
+                              onCheckedChange={(checked) => {
+                                if (isResolved) return;
+                                setSelectedTaskIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (checked) {
+                                    next.add(item.reviewId);
+                                  } else {
+                                    next.delete(item.reviewId);
+                                  }
+                                  return next;
+                                });
+                              }}
+                              aria-label={`Select ${item.nodeLabel}`}
+                            />
+                          </td>
+                          <td
+                            className={`py-3 px-4 text-sm${isResolved ? " line-through text-muted-foreground" : ""}`}
+                          >
+                            {item.nodeLabel}
+                          </td>
+                          <td
+                            className={`py-3 px-4 text-sm${isResolved ? " line-through text-muted-foreground" : ""}`}
+                          >
+                            {item.agentName}
+                          </td>
+                          <td
+                            className={`py-3 px-4 text-sm text-muted-foreground${isResolved ? " line-through" : ""}`}
+                          >
+                            {new Date(item.createdAt).toLocaleDateString()}
+                          </td>
+                          <td className="py-3 px-4">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(
+                                  `/for-review?reviewId=${item.reviewId}`,
+                                );
+                              }}
+                            >
+                              Review
+                            </Button>
+                          </td>
+                        </tr>
                       );
                     })}
                   </tbody>
@@ -2060,74 +2078,79 @@ export default function DashboardPage() {
             {/* Content area */}
             <div className="flex-1 flex flex-col min-w-0">
               <div className="flex-1 overflow-y-auto p-4">
-                {!scratchMenuOpen && (() => {
-                  const entries = storeEntries[selectedCategory];
-                  const isLoading = loadingCategories[selectedCategory];
+                {!scratchMenuOpen &&
+                  (() => {
+                    const entries = storeEntries[selectedCategory];
+                    const isLoading = loadingCategories[selectedCategory];
 
-                  if (isLoading) {
+                    if (isLoading) {
+                      return (
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                          {Array.from({ length: 6 }).map((_, i) => (
+                            <div
+                              key={i}
+                              className="rounded-lg border p-4 space-y-2"
+                            >
+                              <Skeleton className="h-4 w-3/4" />
+                              <Skeleton className="h-3 w-full" />
+                              <Skeleton className="h-3 w-2/3" />
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }
+
+                    if (!entries || entries.length === 0) {
+                      return (
+                        <p className="text-sm text-muted-foreground p-2">
+                          No agents available in this category.
+                        </p>
+                      );
+                    }
+
                     return (
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                        {Array.from({ length: 6 }).map((_, i) => (
-                          <div key={i} className="rounded-lg border p-4 space-y-2">
-                            <Skeleton className="h-4 w-3/4" />
-                            <Skeleton className="h-3 w-full" />
-                            <Skeleton className="h-3 w-2/3" />
-                          </div>
-                        ))}
+                        {entries.map((entry) => {
+                          const checked = selectedStoreIds.has(entry.id);
+                          return (
+                            <div
+                              key={entry.id}
+                              onClick={() => handleToggleStoreEntry(entry.id)}
+                              className={`relative rounded-lg border text-left p-4 transition-colors cursor-pointer ${
+                                checked
+                                  ? "border-primary bg-primary/5"
+                                  : "hover:bg-muted/50"
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-sm font-medium leading-snug flex-1">
+                                  {entry.name}
+                                </p>
+                                <Checkbox
+                                  checked={checked}
+                                  onCheckedChange={() =>
+                                    handleToggleStoreEntry(entry.id)
+                                  }
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="mt-0.5 shrink-0"
+                                  aria-label={`Select ${entry.name}`}
+                                />
+                              </div>
+                              {entry.description && (
+                                <p className="mt-1.5 text-xs text-muted-foreground line-clamp-2">
+                                  {entry.description}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     );
-                  }
-
-                  if (!entries || entries.length === 0) {
-                    return (
-                      <p className="text-sm text-muted-foreground p-2">
-                        No agents available in this category.
-                      </p>
-                    );
-                  }
-
-                  return (
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                      {entries.map((entry) => {
-                        const checked = selectedStoreIds.has(entry.id);
-                        return (
-                          <div
-                            key={entry.id}
-                            onClick={() => handleToggleStoreEntry(entry.id)}
-                            className={`relative rounded-lg border text-left p-4 transition-colors cursor-pointer ${
-                              checked
-                                ? "border-primary bg-primary/5"
-                                : "hover:bg-muted/50"
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <p className="text-sm font-medium leading-snug flex-1">
-                                {entry.name}
-                              </p>
-                              <Checkbox
-                                checked={checked}
-                                onCheckedChange={() =>
-                                  handleToggleStoreEntry(entry.id)
-                                }
-                                onClick={(e) => e.stopPropagation()}
-                                className="mt-0.5 shrink-0"
-                                aria-label={`Select ${entry.name}`}
-                              />
-                            </div>
-                            {entry.description && (
-                              <p className="mt-1.5 text-xs text-muted-foreground line-clamp-2">
-                                {entry.description}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })()}
+                  })()}
                 {scratchMenuOpen && (
                   <p className="text-sm text-muted-foreground p-2">
-                    Select an option from the sidebar to create a new agent from scratch.
+                    Select an option from the sidebar to create a new agent from
+                    scratch.
                   </p>
                 )}
               </div>
