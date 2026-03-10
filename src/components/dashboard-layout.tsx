@@ -39,6 +39,7 @@ const pageTitles: Record<string, string> = {
   "/copilotAgent": "Copilot Agent",
   "/agent-analytics": "Agent Analytics",
   "/workflow-analytics": "Workflow Analytics",
+  "/for-review-dashboard": "Review Dashboard",
 };
 
 function DashboardHeader() {

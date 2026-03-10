@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   CheckCircle2,
+  ChevronRight,
   Clock,
   Copy,
   Loader2,
   Lock,
   Mail,
   Plus,
+  Store,
   Trash2,
   X,
 } from "lucide-react";
@@ -52,6 +54,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getTeamAgents, Agent } from "@/tools/agent_tools";
 import { auth, db } from "@/tools/firebase";
 import { usePostHog } from "posthog-js/react";
@@ -106,7 +115,6 @@ function getAgentTypeLabel(type: string) {
 export default function DashboardPage() {
   const router = useRouter();
   const posthog = usePostHog();
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isLoadingAgents, setIsLoadingAgents] = useState(true);
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
@@ -177,6 +185,49 @@ export default function DashboardPage() {
   const deleteAgentLabel =
     agentToDelete?.name ||
     (agentToDelete?.type ? `${agentToDelete.type} agent` : "this agent");
+
+  const AGENT_STORE_USER_ID = "jyh2RyS8Mvb9OCWF7pKRKEAGxZP2";
+
+  // Agent store browser dialog
+  const STORE_CATEGORIES: { label: string; tag: string }[] = [
+    { label: "Sales and GTM", tag: "sales-and-gtm" },
+    { label: "Operations", tag: "operations" },
+    { label: "Customer Success", tag: "customer-success" },
+    { label: "Human Resources", tag: "human-resources" },
+  ];
+
+  type StoreEntry = {
+    id: string;
+    name: string;
+    description: string;
+    tags: string[];
+    agentType: string;
+    agentId: string;
+  };
+
+  const [storeBrowserOpen, setStoreBrowserOpen] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string>(
+    STORE_CATEGORIES[0].tag,
+  );
+  const [storeEntries, setStoreEntries] = useState<
+    Record<string, StoreEntry[]>
+  >({});
+  const [loadingCategories, setLoadingCategories] = useState<
+    Record<string, boolean>
+  >({});
+  const [selectedStoreIds, setSelectedStoreIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [isInstallingAgents, setIsInstallingAgents] = useState(false);
+  const [scratchMenuOpen, setScratchMenuOpen] = useState(false);
+
+  const [agentStoreDialogOpen, setAgentStoreDialogOpen] = useState(false);
+  const [agentToPublish, setAgentToPublish] = useState<Agent | null>(null);
+  const [publishName, setPublishName] = useState("");
+  const [publishDescription, setPublishDescription] = useState("");
+  const [publishTags, setPublishTags] = useState("");
+  const [isPublishing, setIsPublishing] = useState(false);
+
   const billingStatusUnsubRef = useRef<null | (() => void)>(null);
   const billingSuccessTimeoutRef = useRef<number | null>(null);
 
@@ -859,8 +910,6 @@ export default function DashboardPage() {
   };
 
   const handleAgentTypeSelect = (type: string) => {
-    setIsMenuOpen(false);
-
     // Navigate to the corresponding agent creation page with ?new=true query param
     switch (type.toLowerCase()) {
       case "copilots":
@@ -973,6 +1022,139 @@ export default function DashboardPage() {
       toast.error("Something went wrong deleting the agent.");
     } finally {
       setIsDeletingAgent(false);
+    }
+  };
+
+  const handlePublishToAgentStore = async () => {
+    if (!agentToPublish || isPublishing) {
+      return;
+    }
+
+    const user = auth.currentUser;
+    if (!user || user.uid !== AGENT_STORE_USER_ID) {
+      toast.error("You don't have permission to publish to the agent store.");
+      return;
+    }
+
+    setIsPublishing(true);
+    try {
+      const tags = publishTags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      const response = await fetch("/api/agent-store/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.uid,
+          agent_id: agentToPublish.id,
+          name: publishName.trim() || agentToPublish.name || "",
+          description: publishDescription.trim(),
+          tags,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Failed to publish to agent store:", errorText);
+        toast.error("Failed to publish to agent store.");
+        return;
+      }
+
+      toast.success("Agent published to agent store.");
+      setAgentStoreDialogOpen(false);
+      setAgentToPublish(null);
+      setPublishName("");
+      setPublishDescription("");
+      setPublishTags("");
+    } catch (error) {
+      console.error("Failed to publish to agent store:", error);
+      toast.error("Something went wrong publishing the agent.");
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  const handleCategorySelect = async (tag: string) => {
+    setSelectedCategory(tag);
+    setScratchMenuOpen(false);
+    if (storeEntries[tag] !== undefined || loadingCategories[tag]) {
+      return;
+    }
+    setLoadingCategories((prev) => ({ ...prev, [tag]: true }));
+    try {
+      const response = await fetch(
+        `/api/agent-store/list?tag=${encodeURIComponent(tag)}`,
+      );
+      if (!response.ok) {
+        throw new Error("Failed to fetch agent store entries");
+      }
+      const data = await response.json();
+      setStoreEntries((prev) => ({
+        ...prev,
+        [tag]: Array.isArray(data.entries) ? data.entries : [],
+      }));
+    } catch (error) {
+      console.error("Failed to fetch agent store entries:", error);
+      setStoreEntries((prev) => ({ ...prev, [tag]: [] }));
+    } finally {
+      setLoadingCategories((prev) => ({ ...prev, [tag]: false }));
+    }
+  };
+
+  const handleStoreBrowserOpen = () => {
+    setSelectedStoreIds(new Set());
+    setStoreBrowserOpen(true);
+    void handleCategorySelect(STORE_CATEGORIES[0].tag);
+  };
+
+  const handleToggleStoreEntry = (id: string) => {
+    setSelectedStoreIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleInstallAgents = async () => {
+    const user = auth.currentUser;
+    if (!user || selectedStoreIds.size === 0 || isInstallingAgents) {
+      return;
+    }
+
+    setIsInstallingAgents(true);
+    try {
+      const response = await fetch("/api/agent-store/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.uid,
+          store_entry_ids: Array.from(selectedStoreIds),
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Failed to install agents:", errorText);
+        toast.error("Failed to add agents. Please try again.");
+        return;
+      }
+
+      toast.success(
+        `${selectedStoreIds.size} agent${selectedStoreIds.size !== 1 ? "s" : ""} added successfully.`,
+      );
+      setStoreBrowserOpen(false);
+      setSelectedStoreIds(new Set());
+    } catch (error) {
+      console.error("Failed to install agents:", error);
+      toast.error("Something went wrong adding the agents.");
+    } finally {
+      setIsInstallingAgents(false);
     }
   };
 
@@ -1253,6 +1435,81 @@ export default function DashboardPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <AlertDialog
+        open={agentStoreDialogOpen}
+        onOpenChange={(open) => {
+          setAgentStoreDialogOpen(open);
+          if (!open) {
+            setAgentToPublish(null);
+            setPublishName("");
+            setPublishDescription("");
+            setPublishTags("");
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Add to agent store</AlertDialogTitle>
+            <AlertDialogDescription>
+              Publish &ldquo;{agentToPublish?.name || "this agent"}&rdquo; to the agent store.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Name</label>
+              <Input
+                placeholder={agentToPublish?.name || "Agent name"}
+                value={publishName}
+                onChange={(e) => setPublishName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Description</label>
+              <Input
+                placeholder="What this agent does"
+                value={publishDescription}
+                onChange={(e) => setPublishDescription(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Tags</label>
+              <Input
+                placeholder="tag1, tag2, tag3"
+                value={publishTags}
+                onChange={(e) => setPublishTags(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">Comma-separated</p>
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                setAgentStoreDialogOpen(false);
+                setAgentToPublish(null);
+                setPublishName("");
+                setPublishDescription("");
+                setPublishTags("");
+              }}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <Button
+              onClick={handlePublishToAgentStore}
+              disabled={isPublishing}
+            >
+              {isPublishing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Publishing...
+                </>
+              ) : (
+                "Publish"
+              )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* TODO - edit this to make it  for members - non-creator agents (only invite agents). */}
       <AlertDialog open={memberDialogOpen} onOpenChange={setMemberDialogOpen}>
         <AlertDialogContent className="max-h-[80vh] overflow-hidden flex flex-col">
@@ -1645,6 +1902,30 @@ export default function DashboardPage() {
                             align="end"
                             onClick={(event) => event.stopPropagation()}
                           >
+                            {auth.currentUser?.uid === AGENT_STORE_USER_ID && (
+                              <DropdownMenuItem
+                                onSelect={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  setAgentToPublish(agent);
+                                  setPublishName(agent.name ?? "");
+                                  setPublishDescription("");
+                                  setPublishTags("");
+                                  setAgentStoreDialogOpen(true);
+                                }}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setAgentToPublish(agent);
+                                  setPublishName(agent.name ?? "");
+                                  setPublishDescription("");
+                                  setPublishTags("");
+                                  setAgentStoreDialogOpen(true);
+                                }}
+                              >
+                                <Store className="h-4 w-4" />
+                                Add to agent store
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem
                               variant="destructive"
                               onSelect={(event) => {
@@ -1687,41 +1968,197 @@ export default function DashboardPage() {
 
       {/* Floating Action Button */}
       <div className="fixed bottom-6 right-6 z-50">
-        <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="lg"
-              className="rounded-lg px-6 h-14 shadow-lg hover:shadow-xl transition-shadow gap-2 bg-card text-card-foreground border border-border hover:bg-accent hover:text-accent-foreground"
-            >
-              <Plus className="h-5 w-5" />
-              <span>Add new agent</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem
-              onClick={() => handleAgentTypeSelect("workflow")}
-              className="flex items-center gap-2 cursor-pointer"
-            >
-              <GoWorkflow className="h-4 w-4" />
-              <span>Workflow</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => handleAgentTypeSelect("source chat")}
-              className="flex items-center gap-2 cursor-pointer"
-            >
-              <MdChatBubble className="h-4 w-4" />
-              <span>Chat (RAG) agent</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => handleAgentTypeSelect("copilots")}
-              className="flex items-center gap-2 cursor-pointer"
-            >
-              <FaHandsHelping className="h-4 w-4" />
-              <span>Copilots</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Button
+          size="lg"
+          className="rounded-lg px-6 h-14 shadow-lg hover:shadow-xl transition-shadow gap-2 bg-card text-card-foreground border border-border hover:bg-accent hover:text-accent-foreground"
+          onClick={handleStoreBrowserOpen}
+        >
+          <Plus className="h-5 w-5" />
+          <span>Add new agent</span>
+        </Button>
       </div>
+
+      {/* Agent Store Browser Dialog */}
+      <Dialog
+        open={storeBrowserOpen}
+        onOpenChange={(open) => {
+          setStoreBrowserOpen(open);
+          if (!open) {
+            setSelectedStoreIds(new Set());
+            setScratchMenuOpen(false);
+          }
+        }}
+      >
+        <DialogContent className="max-w-4xl h-[600px] p-0 gap-0 flex flex-col">
+          <DialogHeader className="px-6 pt-5 pb-4 border-b shrink-0">
+            <DialogTitle>Add agents</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-1 min-h-0">
+            {/* Sidebar */}
+            <div className="w-52 shrink-0 border-r flex flex-col">
+              <nav className="flex-1 py-2 overflow-y-auto">
+                {STORE_CATEGORIES.map((cat) => (
+                  <button
+                    key={cat.tag}
+                    type="button"
+                    onClick={() => handleCategorySelect(cat.tag)}
+                    className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
+                      selectedCategory === cat.tag && !scratchMenuOpen
+                        ? "bg-accent text-accent-foreground font-medium"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </nav>
+              {/* Create from scratch */}
+              <div className="border-t py-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setScratchMenuOpen((prev) => !prev)}
+                  className={`w-full flex items-center justify-between px-4 py-2.5 text-sm transition-colors ${
+                    scratchMenuOpen
+                      ? "bg-accent text-accent-foreground font-medium"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
+                >
+                  <span>Create from scratch</span>
+                  <ChevronRight
+                    className={`h-3.5 w-3.5 transition-transform ${scratchMenuOpen ? "rotate-90" : ""}`}
+                  />
+                </button>
+                {scratchMenuOpen && (
+                  <div className="pl-4">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStoreBrowserOpen(false);
+                        handleAgentTypeSelect("workflow");
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                    >
+                      <GoWorkflow className="h-3.5 w-3.5 shrink-0" />
+                      Workflow
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStoreBrowserOpen(false);
+                        handleAgentTypeSelect("source chat");
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                    >
+                      <MdChatBubble className="h-3.5 w-3.5 shrink-0" />
+                      Chatbot
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Content area */}
+            <div className="flex-1 flex flex-col min-w-0">
+              <div className="flex-1 overflow-y-auto p-4">
+                {!scratchMenuOpen && (() => {
+                  const entries = storeEntries[selectedCategory];
+                  const isLoading = loadingCategories[selectedCategory];
+
+                  if (isLoading) {
+                    return (
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                        {Array.from({ length: 6 }).map((_, i) => (
+                          <div key={i} className="rounded-lg border p-4 space-y-2">
+                            <Skeleton className="h-4 w-3/4" />
+                            <Skeleton className="h-3 w-full" />
+                            <Skeleton className="h-3 w-2/3" />
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+
+                  if (!entries || entries.length === 0) {
+                    return (
+                      <p className="text-sm text-muted-foreground p-2">
+                        No agents available in this category.
+                      </p>
+                    );
+                  }
+
+                  return (
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      {entries.map((entry) => {
+                        const checked = selectedStoreIds.has(entry.id);
+                        return (
+                          <div
+                            key={entry.id}
+                            onClick={() => handleToggleStoreEntry(entry.id)}
+                            className={`relative rounded-lg border text-left p-4 transition-colors cursor-pointer ${
+                              checked
+                                ? "border-primary bg-primary/5"
+                                : "hover:bg-muted/50"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-sm font-medium leading-snug flex-1">
+                                {entry.name}
+                              </p>
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={() =>
+                                  handleToggleStoreEntry(entry.id)
+                                }
+                                onClick={(e) => e.stopPropagation()}
+                                className="mt-0.5 shrink-0"
+                                aria-label={`Select ${entry.name}`}
+                              />
+                            </div>
+                            {entry.description && (
+                              <p className="mt-1.5 text-xs text-muted-foreground line-clamp-2">
+                                {entry.description}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+                {scratchMenuOpen && (
+                  <p className="text-sm text-muted-foreground p-2">
+                    Select an option from the sidebar to create a new agent from scratch.
+                  </p>
+                )}
+              </div>
+
+              {/* Footer */}
+              {!scratchMenuOpen && (
+                <div className="border-t px-4 py-3 flex items-center justify-between shrink-0">
+                  <span className="text-sm text-muted-foreground">
+                    {selectedStoreIds.size > 0
+                      ? `${selectedStoreIds.size} agent${selectedStoreIds.size !== 1 ? "s" : ""} selected`
+                      : "Select agents to add"}
+                  </span>
+                  <Button
+                    disabled={selectedStoreIds.size === 0 || isInstallingAgents}
+                    onClick={handleInstallAgents}
+                  >
+                    {isInstallingAgents ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Adding...
+                      </>
+                    ) : (
+                      "Add agents"
+                    )}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
